@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pm-copilot"
+version = "0.1.0"
+description = "AI-powered Product Management assistant"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.30.0",
+    "anthropic>=0.40.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pm_copilot"]

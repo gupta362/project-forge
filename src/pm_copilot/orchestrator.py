@@ -4,16 +4,16 @@ from dotenv import load_dotenv  # load .env before Anthropic client
 load_dotenv()
 
 from anthropic import Anthropic
-from tools import handle_tool_call, TOOL_DEFINITIONS
-from prompts import (
+from .tools import handle_tool_call, TOOL_DEFINITIONS
+from .prompts import (
     SYSTEM_PROMPT,
     PHASE_A_PROMPT,
     PHASE_B_ORCHESTRATOR_PROMPT,
     PHASE_B_MODE1_PROMPT,
 )
-from mode1_knowledge import MODE1_KNOWLEDGE
-from org_context import format_org_context
-from config import MODEL_NAME
+from .mode1_knowledge import MODE1_KNOWLEDGE
+from .org_context import format_org_context
+from .config import MODEL_NAME
 
 
 client = Anthropic()

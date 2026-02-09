@@ -11,3 +11,9 @@ wheels/
 
 # Secrets
 .env
+
+# OS files
+.DS_Store
+
+# Local test scenarios
+tests/
