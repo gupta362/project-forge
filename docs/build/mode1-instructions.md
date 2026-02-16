@@ -1,4 +1,4 @@
-# PM Agents v2 — Claude Code Instructions
+# Project Forge — Claude Code Instructions
 
 ## What You're Building
 

@@ -1,4 +1,4 @@
-# PM Agents v2 — Build Status & Document Manifest
+# Project Forge — Build Status & Document Manifest
 
 ## Purpose
 This is the single source of truth for what's been built, what's next, and where every build document lives. Commit this to the repo root as `docs/BUILD-STATUS.md`.
@@ -87,7 +87,7 @@ These files were created during design sessions but are NOT build documents. The
 ## Repo Structure After Copying
 
 ```
-pm-agents-v2/
+project-forge/
 ├── src/
 │   └── pm_copilot/
 │       ├── app.py

@@ -19,7 +19,7 @@ def extract_questions(text):
     return [(num, title.strip()) for num, title in matches]
 
 
-st.set_page_config(page_title="PM Co-Pilot", layout="wide")
+st.set_page_config(page_title="Forge", layout="wide")
 
 # Prevent sidebar expander labels from truncating
 st.markdown(
@@ -40,7 +40,7 @@ init_session_state()
 
 # --- Sidebar ---
 with st.sidebar:
-    st.title("PM Co-Pilot")
+    st.title("Forge")
     st.caption("Orchestrator + Mode 1 + Mode 2")
 
     st.divider()
@@ -174,7 +174,7 @@ with st.sidebar:
     st.write("Mode 5: Prioritize & Sequence")
 
 # --- Main Chat ---
-st.title("PM Co-Pilot")
+st.title("Forge")
 
 # Display chat history
 for msg in st.session_state.messages:

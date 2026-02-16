@@ -1,4 +1,4 @@
-# PM Agents v2 — Claude Code Implementation Spec
+# Project Forge — Claude Code Implementation Spec
 ## Orchestrator + Mode 1: Discover & Frame
 
 ### Document Purpose

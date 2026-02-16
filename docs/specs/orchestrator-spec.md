@@ -1,4 +1,4 @@
-# PM Agents v2 — Orchestrator Specification (v2)
+# Project Forge — Orchestrator Specification (v2)
 
 ## Document Purpose
 This is the finalized orchestrator design spec, compiled from iterative design sessions. It captures all architecture decisions, interaction patterns, and data structures needed to implement the orchestrator layer of the PM Agents system.

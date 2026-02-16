@@ -1,4 +1,4 @@
-# PM Co-Pilot
+# Forge
 
 An AI-powered product management assistant that helps PMs discover, frame, and rigorously evaluate solutions before committing resources.
 
@@ -8,7 +8,7 @@ An AI-powered product management assistant that helps PMs discover, frame, and r
 
 ## What It Does
 
-PM Co-Pilot is a conversational agent that acts as a thought partner for product managers. Instead of a generic chatbot, it uses a **two-phase orchestrator** with specialized modes to guide structured problem discovery and solution evaluation.
+Forge is a conversational agent that acts as a thought partner for product managers. Instead of a generic chatbot, it uses a **two-phase orchestrator** with specialized modes to guide structured problem discovery and solution evaluation.
 
 **Core capabilities:**
 - **Progressive questioning** — Asks 2-3 focused questions per turn, not a wall of interrogation
@@ -127,7 +127,7 @@ flowchart TD
 ## Project Structure
 
 ```
-pm-agent-v2/
+project-forge/
 ├── src/pm_copilot/
 │   ├── __init__.py            # Package metadata
 │   ├── app.py                 # Streamlit UI, sidebar, downloads (JSON/CSV/Markdown)
@@ -171,8 +171,8 @@ pm-agent-v2/
 
 ```bash
 # Clone the repo
-git clone https://github.com/gupta362/pm-agent-v2.git
-cd pm-agent-v2
+git clone https://github.com/gupta362/project-forge.git
+cd project-forge
 
 # Create virtual environment
 uv venv
