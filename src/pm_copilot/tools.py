@@ -114,7 +114,7 @@ TOOL_DEFINITIONS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "artifact_type": {"type": "string", "enum": ["problem_brief"]},
+                "artifact_type": {"type": "string", "enum": ["problem_brief", "solution_evaluation_brief"]},
             },
             "required": ["artifact_type"],
         },
@@ -167,6 +167,67 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "set_risk_assessment",
+        "description": "Set or update a risk assessment for one of the four Cagan risk dimensions (value, usability, feasibility, viability). Call this as you evaluate each dimension during Mode 2.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "dimension": {"type": "string", "enum": ["value", "usability", "feasibility", "viability"],
+                              "description": "Which risk dimension to assess"},
+                "level": {"type": "string", "enum": ["low", "medium", "high"]},
+                "summary": {"type": "string", "description": "1-2 sentence assessment of this risk dimension"},
+                "evidence_for": {"type": "array", "items": {"type": "string"},
+                                "description": "Evidence supporting low risk", "default": []},
+                "evidence_against": {"type": "array", "items": {"type": "string"},
+                                    "description": "Evidence supporting high risk", "default": []},
+            },
+            "required": ["dimension", "level", "summary"],
+        },
+    },
+    {
+        "name": "set_validation_plan",
+        "description": "Set the recommended validation approach for the riskiest assumption. Call this after identifying the key risks.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "riskiest_assumption": {"type": "string", "description": "Assumption ID (e.g., 'A5')"},
+                "approach": {"type": "string", "enum": ["painted_door", "concierge", "technical_spike", "wizard_of_oz", "prototype", "other"]},
+                "description": {"type": "string", "description": "Specific validation plan"},
+                "timeline": {"type": "string", "description": "Estimated duration"},
+                "success_criteria": {"type": "string", "description": "What 'validated' looks like"},
+            },
+            "required": ["riskiest_assumption", "approach", "description", "success_criteria"],
+        },
+    },
+    {
+        "name": "set_go_no_go",
+        "description": "Set the go/no-go recommendation with conditions and dealbreakers. Call this when the evaluation is complete, before generating the artifact.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "recommendation": {"type": "string", "enum": ["go", "conditional_go", "pivot", "no_go"]},
+                "conditions": {"type": "array", "items": {"type": "string"},
+                              "description": "What must be true for 'go'"},
+                "dealbreakers": {"type": "array", "items": {"type": "string"},
+                                "description": "What would make this 'no_go'"},
+            },
+            "required": ["recommendation", "conditions", "dealbreakers"],
+        },
+    },
+    {
+        "name": "set_solution_info",
+        "description": "Set the solution name, description, and optionally build-vs-buy assessment. Call on first Mode 2 turn to identify what's being evaluated.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "solution_name": {"type": "string", "description": "Name of the solution being evaluated"},
+                "solution_description": {"type": "string", "description": "2-3 sentence summary of the proposed solution"},
+                "build_vs_buy": {"type": "string", "description": "Build vs buy assessment summary (optional)"},
+            },
+            "required": ["solution_name", "solution_description"],
+        },
+    },
+    {
         "name": "update_org_context",
         "description": "Update the organizational context. Call on the first turn to capture public knowledge about the company/domain, and when the user provides internal context. Can also be called when the problem domain shifts materially.",
         "input_schema": {
@@ -195,6 +256,10 @@ def handle_tool_call(tool_name: str, tool_input: dict) -> str:
         "update_success_metrics": _handle_update_success_metrics,
         "add_decision_criteria": _handle_add_decision_criteria,
         "generate_artifact": _handle_generate_artifact,
+        "set_risk_assessment": _handle_set_risk_assessment,
+        "set_validation_plan": _handle_set_validation_plan,
+        "set_go_no_go": _handle_set_go_no_go,
+        "set_solution_info": _handle_set_solution_info,
         "record_pattern_fired": _handle_record_pattern_fired,
         "record_probe_fired": _handle_record_probe_fired,
         "update_conversation_summary": _handle_update_conversation_summary,
@@ -316,7 +381,18 @@ def _handle_add_decision_criteria(input: dict) -> str:
 
 
 def _handle_generate_artifact(input: dict) -> str:
-    """Render current state into formatted document. Returns the rendered markdown."""
+    """Dispatch to the appropriate artifact renderer."""
+    artifact_type = input["artifact_type"]
+    if artifact_type == "problem_brief":
+        return _render_problem_brief()
+    elif artifact_type == "solution_evaluation_brief":
+        return _render_solution_evaluation_brief()
+    else:
+        return f"Unknown artifact type: {artifact_type}"
+
+
+def _render_problem_brief() -> str:
+    """Render Mode 1 artifact from skeleton + assumptions."""
     skeleton = st.session_state.document_skeleton
     assumptions = st.session_state.assumption_register
 
@@ -394,6 +470,154 @@ def _handle_generate_artifact(input: dict) -> str:
 """
     st.session_state.latest_artifact = doc
     return doc
+
+
+def _render_solution_evaluation_brief() -> str:
+    """Render Mode 2 artifact from flat skeleton keys + assumptions."""
+    skeleton = st.session_state.document_skeleton
+    assumptions = st.session_state.assumption_register
+
+    # Defensive check
+    empty_fields = []
+    if not skeleton.get("solution_name"):
+        empty_fields.append("solution_name")
+    if not skeleton.get("value_risk_level"):
+        empty_fields.append("value_risk_level")
+    if not skeleton.get("go_no_go_recommendation"):
+        empty_fields.append("go_no_go_recommendation")
+    if empty_fields:
+        return (
+            f"WARNING: The following skeleton fields are empty: {', '.join(empty_fields)}. "
+            "You must call set_solution_info, set_risk_assessment, and set_go_no_go "
+            "BEFORE calling generate_artifact. Please populate these fields first, then call generate_artifact again."
+        )
+
+    # Build risk sections
+    def format_risk(dimension_name, display_name):
+        level = skeleton.get(f"{dimension_name}_risk_level")
+        if not level:
+            return f"### {display_name}: _Not assessed_\n"
+        summary = skeleton.get(f"{dimension_name}_risk_summary", "_No summary_")
+        text = f"### {display_name}: {level.upper()}\n{summary}\n"
+        evidence_for = skeleton.get(f"{dimension_name}_risk_evidence_for", [])
+        evidence_against = skeleton.get(f"{dimension_name}_risk_evidence_against", [])
+        if evidence_for:
+            text += "\n**Supporting evidence:**\n" + "\n".join(f"- {e}" for e in evidence_for) + "\n"
+        if evidence_against:
+            text += "\n**Concerns:**\n" + "\n".join(f"- {e}" for e in evidence_against) + "\n"
+        return text
+
+    risk_text = ""
+    risk_text += format_risk("value", "Value Risk")
+    risk_text += format_risk("usability", "Usability Risk")
+    risk_text += format_risk("feasibility", "Feasibility Risk")
+    risk_text += format_risk("viability", "Viability Risk")
+
+    # Build assumption table (all active/at_risk)
+    assumption_rows = ""
+    for aid, a in sorted(assumptions.items()):
+        if a["status"] in ("active", "at_risk"):
+            assumption_rows += f"| {a['id']} | {a['claim']} | {a['impact']} | {a['confidence']} | {a['recommended_action']} |\n"
+
+    # Build vs buy
+    bvb = skeleton.get("build_vs_buy_assessment")
+    bvb_text = bvb if bvb else "_Not applicable or not assessed_"
+
+    # Validation plan
+    vp_approach = skeleton.get("validation_approach")
+    if vp_approach:
+        vp_text = f"**Approach:** {vp_approach}\n"
+        vp_text += f"{skeleton.get('validation_description', '')}\n"
+        if skeleton.get("validation_timeline"):
+            vp_text += f"\n**Timeline:** {skeleton['validation_timeline']}\n"
+        if skeleton.get("validation_success_criteria"):
+            vp_text += f"\n**Success criteria:** {skeleton['validation_success_criteria']}\n"
+    else:
+        vp_text = "_Not yet defined_"
+
+    # Go/no-go
+    rec = (skeleton.get("go_no_go_recommendation") or "NOT YET DETERMINED").upper().replace("_", " ")
+    conditions = "\n".join(f"- {c}" for c in skeleton.get("go_no_go_conditions", []))
+    dealbreakers = "\n".join(f"- {d}" for d in skeleton.get("go_no_go_dealbreakers", []))
+
+    doc = f"""# Solution Evaluation: {skeleton.get('solution_name', '_Unnamed_')}
+
+## Executive Summary
+{skeleton.get('solution_description', '_No description_')}
+
+## Problem-Solution Fit
+Evaluated against: {skeleton.get('problem_statement', '_No problem statement from Mode 1_')}
+
+## Risk Assessment
+
+{risk_text}
+
+## Build vs. Buy Consideration
+{bvb_text}
+
+## Key Assumptions Requiring Validation
+
+| ID | Assumption | Impact | Confidence | Recommended Validation |
+|----|-----------|--------|------------|----------------------|
+{assumption_rows or '| — | No assumptions registered | — | — | — |'}
+
+## Recommended Validation Approach
+{vp_text}
+
+## Go/No-Go Assessment
+**Recommendation: {rec}**
+
+**Proceed IF:**
+{conditions or '_Not yet defined_'}
+
+**Do NOT proceed IF:**
+{dealbreakers or '_Not yet defined_'}
+"""
+    st.session_state.latest_artifact = doc
+    return doc
+
+
+def _handle_set_risk_assessment(input: dict) -> str:
+    """Set risk assessment for one of the four Cagan dimensions."""
+    dim = input["dimension"]
+    skeleton = st.session_state.document_skeleton
+    skeleton[f"{dim}_risk_level"] = input["level"]
+    skeleton[f"{dim}_risk_summary"] = input["summary"]
+    if "evidence_for" in input:
+        skeleton[f"{dim}_risk_evidence_for"] = input["evidence_for"]
+    if "evidence_against" in input:
+        skeleton[f"{dim}_risk_evidence_against"] = input["evidence_against"]
+    return f"Set {dim} risk: {input['level']} — {input['summary']}"
+
+
+def _handle_set_validation_plan(input: dict) -> str:
+    """Set the validation plan."""
+    skeleton = st.session_state.document_skeleton
+    skeleton["validation_riskiest_assumption"] = input["riskiest_assumption"]
+    skeleton["validation_approach"] = input["approach"]
+    skeleton["validation_description"] = input["description"]
+    skeleton["validation_timeline"] = input.get("timeline")
+    skeleton["validation_success_criteria"] = input["success_criteria"]
+    return f"Validation plan set: {input['approach']} for {input['riskiest_assumption']}"
+
+
+def _handle_set_go_no_go(input: dict) -> str:
+    """Set the go/no-go recommendation."""
+    skeleton = st.session_state.document_skeleton
+    skeleton["go_no_go_recommendation"] = input["recommendation"]
+    skeleton["go_no_go_conditions"] = input["conditions"]
+    skeleton["go_no_go_dealbreakers"] = input["dealbreakers"]
+    return f"Go/no-go set: {input['recommendation']}"
+
+
+def _handle_set_solution_info(input: dict) -> str:
+    """Set solution name, description, and optionally build-vs-buy."""
+    skeleton = st.session_state.document_skeleton
+    skeleton["solution_name"] = input["solution_name"]
+    skeleton["solution_description"] = input["solution_description"]
+    if "build_vs_buy" in input and input["build_vs_buy"]:
+        skeleton["build_vs_buy_assessment"] = input["build_vs_buy"]
+    return f"Solution info set: {input['solution_name']}"
 
 
 def _handle_record_pattern_fired(input: dict) -> str:

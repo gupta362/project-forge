@@ -1,3 +1,6 @@
+import csv
+import io
+import json
 import re
 import sys
 from pathlib import Path
@@ -38,7 +41,7 @@ init_session_state()
 # --- Sidebar ---
 with st.sidebar:
     st.title("PM Co-Pilot")
-    st.caption("Orchestrator + Mode 1: Discover & Frame")
+    st.caption("Orchestrator + Mode 1 + Mode 2")
 
     st.divider()
 
@@ -53,23 +56,34 @@ with st.sidebar:
     # Assumption register display
     st.divider()
     st.subheader("Assumptions")
-    st.caption("🔴 High impact, unvalidated · 🟡 High impact, some evidence · 🟢 Lower impact")
-    assumptions = st.session_state.assumption_register
-    if assumptions:
-        for aid, a in sorted(assumptions.items()):
-            if a["impact"] == "high" and a["confidence"] == "guessed":
-                icon = "🔴"
-            elif a["impact"] == "high":
-                icon = "🟡"
-            else:
-                icon = "🟢"
-            with st.expander(f"{icon} {a['id']}: {a['claim']}", expanded=False):
-                st.markdown(f"**{a['claim']}**")
-                st.write(f"**Type:** {a['type']}")
-                st.write(f"**Impact:** {a['impact']} | **Confidence:** {a['confidence']}")
-                st.write(f"**Status:** {a['status']}")
-                st.write(f"**Basis:** {a['basis']}")
-                st.write(f"**Action:** {a['recommended_action']}")
+    if st.session_state.assumption_register:
+        assumptions = st.session_state.assumption_register
+
+        # Quick summary counts
+        total = len(assumptions)
+        active = sum(1 for a in assumptions.values() if a["status"] == "active")
+        at_risk = sum(1 for a in assumptions.values() if a["status"] == "at_risk")
+        guessed = sum(1 for a in assumptions.values() if a["confidence"] == "guessed")
+
+        st.metric("Assumptions", total)
+
+        # Status bar
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Active", active)
+        col2.metric("At Risk", at_risk)
+        col3.metric("Guessed", guessed)
+
+        # Expandable detail view
+        with st.expander("View All Assumptions", expanded=False):
+            for aid, a in sorted(assumptions.items()):
+                status_icon = {"active": "🟢", "at_risk": "🟡", "validated": "✅", "invalidated": "❌"}.get(a["status"], "⚪")
+                confidence_icon = {"guessed": "❓", "informed": "💡", "validated": "✅"}.get(a["confidence"], "⚪")
+
+                st.markdown(f"**{a['id']}** {status_icon} {a['claim']}")
+                st.caption(f"Impact: {a['impact']} | Confidence: {confidence_icon} {a['confidence']} | Action: {a.get('recommended_action', 'None')}")
+                if a.get("depends_on"):
+                    st.caption(f"Depends on: {', '.join(a['depends_on'])}")
+                st.markdown("---")
     else:
         st.caption("No assumptions tracked yet.")
 
@@ -89,11 +103,57 @@ with st.sidebar:
     if st.session_state.latest_artifact:
         st.divider()
         st.subheader("Latest Artifact")
+        if st.session_state.latest_artifact.startswith("# Solution Evaluation"):
+            label = "Download Solution Evaluation"
+            filename = "solution_evaluation.md"
+        else:
+            label = "Download Problem Brief"
+            filename = "problem_brief.md"
         st.download_button(
-            label="Download Problem Brief",
+            label=label,
             data=st.session_state.latest_artifact,
-            file_name="problem_brief.md",
+            file_name=filename,
             mime="text/markdown",
+            use_container_width=True,
+        )
+
+    # Assumption register download
+    if st.session_state.assumption_register:
+        st.divider()
+        st.subheader("Assumption Register")
+
+        assumptions = st.session_state.assumption_register
+
+        # JSON download
+        st.download_button(
+            "Download as JSON",
+            data=json.dumps(assumptions, indent=2),
+            file_name="assumption_register.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+        # CSV download
+        csv_buffer = io.StringIO()
+        if assumptions:
+            first = next(iter(assumptions.values()))
+            fieldnames = list(first.keys())
+            writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+            writer.writeheader()
+            for aid, a in sorted(assumptions.items()):
+                row = {}
+                for k, v in a.items():
+                    if isinstance(v, list):
+                        row[k] = "; ".join(str(i) for i in v)
+                    else:
+                        row[k] = v
+                writer.writerow(row)
+
+        st.download_button(
+            "Download as CSV",
+            data=csv_buffer.getvalue(),
+            file_name="assumption_register.csv",
+            mime="text/csv",
             use_container_width=True,
         )
 
@@ -107,8 +167,8 @@ with st.sidebar:
     # Modes roadmap
     st.divider()
     st.subheader("Modes")
-    st.write("Mode 1: Discover & Frame")
-    st.write("Mode 2: Evaluate Solution")
+    st.write("✅ Mode 1: Discover & Frame")
+    st.write("✅ Mode 2: Evaluate Solution")
     st.write("Mode 3: Surface Constraints")
     st.write("Mode 4: Size & Value")
     st.write("Mode 5: Prioritize & Sequence")

@@ -10,8 +10,10 @@ from .prompts import (
     PHASE_A_PROMPT,
     PHASE_B_ORCHESTRATOR_PROMPT,
     PHASE_B_MODE1_PROMPT,
+    PHASE_B_MODE2_PROMPT,
 )
 from .mode1_knowledge import MODE1_KNOWLEDGE
+from .mode2_knowledge import MODE2_KNOWLEDGE
 from .org_context import format_org_context
 from .config import MODEL_NAME
 
@@ -117,6 +119,10 @@ def _run_phase_a(user_message: str) -> dict:
         st.session_state.active_mode = "mode_1"
         st.session_state.routing_context["critical_mass_reached"] = True
         st.session_state.routing_context["mode_turn_count"] = 0
+    elif routing.get("enter_mode") == "mode_2" and st.session_state.active_mode != "mode_2":
+        st.session_state.current_phase = "mode_active"
+        st.session_state.active_mode = "mode_2"
+        st.session_state.routing_context["mode_turn_count"] = 0
 
     # Handle complete_mode from Phase A safety net
     if routing.get("next_action") == "complete_mode":
@@ -150,6 +156,17 @@ def _run_phase_b(routing_decision: dict) -> str:
             turn_count=st.session_state.turn_count,
             is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
         )
+    elif st.session_state.active_mode == "mode_2":
+        phase_b_prompt = PHASE_B_MODE2_PROMPT.format(
+            phase_a_output=json.dumps(routing_decision, indent=2),
+            full_messages=_format_messages(st.session_state.messages),
+            full_assumptions=_format_assumptions(),
+            document_skeleton=_format_skeleton(),
+            org_context=org_context_text,
+            mode2_knowledge=MODE2_KNOWLEDGE,
+            turn_count=st.session_state.turn_count,
+            is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
+        )
     else:
         phase_b_prompt = PHASE_B_ORCHESTRATOR_PROMPT.format(
             phase_a_output=json.dumps(routing_decision, indent=2),
@@ -174,6 +191,17 @@ def _run_phase_b(routing_decision: dict) -> str:
                     document_skeleton=_format_skeleton(),
                     org_context=org_context_text,
                     mode1_knowledge=MODE1_KNOWLEDGE,
+                    turn_count=st.session_state.turn_count,
+                    is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
+                )
+            elif st.session_state.active_mode == "mode_2":
+                phase_b_prompt = PHASE_B_MODE2_PROMPT.format(
+                    phase_a_output=json.dumps(routing_decision, indent=2),
+                    full_messages=_format_messages(truncated),
+                    full_assumptions=_format_assumptions(),
+                    document_skeleton=_format_skeleton(),
+                    org_context=org_context_text,
+                    mode2_knowledge=MODE2_KNOWLEDGE,
                     turn_count=st.session_state.turn_count,
                     is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
                 )
@@ -273,11 +301,20 @@ def _build_assumption_summary() -> str:
     return "\n".join(lines)
 
 
+def _format_user_input(user_message: str) -> str:
+    """Wrap large user inputs in XML tags for instruction isolation."""
+    if len(user_message) > 500:
+        return f"<user_context>\n{user_message}\n</user_context>"
+    return user_message
+
+
 def _format_messages(messages: list) -> str:
     """Format message history for prompt injection."""
-    return "\n\n".join(
-        f"**{m['role'].upper()}:** {m['content']}" for m in messages
-    )
+    formatted = []
+    for m in messages:
+        content = _format_user_input(m["content"]) if m["role"] == "user" else m["content"]
+        formatted.append(f"**{m['role'].upper()}:** {content}")
+    return "\n\n".join(formatted)
 
 
 def _format_assumptions() -> str:
@@ -315,4 +352,17 @@ def _format_skeleton() -> str:
         parts.append("Proceed IF: " + "; ".join(s["decision_criteria"]["proceed_if"]))
     if s["decision_criteria"]["do_not_proceed_if"]:
         parts.append("Do NOT IF: " + "; ".join(s["decision_criteria"]["do_not_proceed_if"]))
+    # Mode 2 fields
+    if s.get("solution_name"):
+        parts.append(f"Solution: {s['solution_name']}")
+    if s.get("solution_description"):
+        parts.append(f"Description: {s['solution_description']}")
+    for dim in ["value", "usability", "feasibility", "viability"]:
+        level = s.get(f"{dim}_risk_level")
+        if level:
+            summary = s.get(f"{dim}_risk_summary", "")
+            parts.append(f"{dim.title()} Risk: {level} — {summary}")
+    rec = s.get("go_no_go_recommendation")
+    if rec:
+        parts.append(f"Go/No-Go: {rec}")
     return "\n".join(parts) if parts else "Document skeleton is empty."
