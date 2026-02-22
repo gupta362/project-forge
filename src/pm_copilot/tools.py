@@ -1,4 +1,7 @@
+import logging
 import streamlit as st
+
+logger = logging.getLogger("forge.tools")
 
 
 TOOL_DEFINITIONS = [
@@ -246,6 +249,7 @@ TOOL_DEFINITIONS = [
 
 def handle_tool_call(tool_name: str, tool_input: dict) -> str:
     """Route a tool call to the appropriate handler. Returns result string."""
+    logger.debug("Tool call: %s | input: %.200s", tool_name, str(tool_input))
     handlers = {
         "register_assumption": _handle_register_assumption,
         "update_assumption_status": _handle_update_assumption_status,
@@ -269,6 +273,7 @@ def handle_tool_call(tool_name: str, tool_input: dict) -> str:
     handler = handlers.get(tool_name)
     if handler:
         return handler(tool_input)
+    logger.warning("Unknown tool name: %s", tool_name)
     return f"Unknown tool: {tool_name}"
 
 

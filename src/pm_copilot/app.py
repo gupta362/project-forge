@@ -7,8 +7,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import logging
 import streamlit as st
 from pm_copilot.state import init_session_state
+
+logger = logging.getLogger("forge.app")
 from pm_copilot.orchestrator import run_turn
 
 
@@ -37,6 +40,7 @@ st.markdown(
 
 # --- Initialize ---
 init_session_state()
+logger.info("App startup — session initialized")
 
 # --- Sidebar ---
 with st.sidebar:

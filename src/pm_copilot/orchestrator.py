@@ -16,8 +16,8 @@ from .mode1_knowledge import MODE1_KNOWLEDGE
 from .mode2_knowledge import MODE2_KNOWLEDGE
 from .org_context import format_org_context
 from .config import MODEL_NAME
-import logging
-logger = logging.getLogger(__name__)
+from .logging_config import setup_logging
+logger = setup_logging()
 
 
 client = Anthropic()
@@ -29,6 +29,7 @@ def run_turn(user_message: str) -> str:
     Returns the assistant's response text.
     """
     st.session_state.turn_count += 1
+    logger.info("=== Turn %d start ===", st.session_state.turn_count)
 
     # Add user message to history
     st.session_state.messages.append({"role": "user", "content": user_message})
@@ -95,12 +96,18 @@ def _run_phase_a(user_message: str) -> dict:
             messages=[{"role": "user", "content": prompt}],
         )
 
+        logger.debug(
+            "API usage - input_tokens: %d, output_tokens: %d, stop_reason: %s",
+            response.usage.input_tokens, response.usage.output_tokens, response.stop_reason,
+        )
+
         # Parse JSON from response
         raw = response.content[0].text.strip()
         # Handle potential markdown code fence
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         routing = json.loads(raw)
+        logger.info("Phase A decision: %s", json.dumps(routing))
     except Exception:
         # Fallback: continue with safe default
         routing = {
@@ -145,6 +152,7 @@ def _run_phase_b(routing_decision: dict) -> str:
     Returns the final text response.
     """
     org_context_text = format_org_context()
+    logger.info("Phase B executing: %s", st.session_state.active_mode or "orchestrator")
 
     # Build the appropriate prompt based on active mode
     if st.session_state.active_mode == "mode_1":
@@ -228,6 +236,10 @@ def _run_phase_b(routing_decision: dict) -> str:
                 system=SYSTEM_PROMPT,
                 messages=api_messages,
                 tools=TOOL_DEFINITIONS,
+            )
+            logger.debug(
+                "API usage - input_tokens: %d, output_tokens: %d, stop_reason: %s",
+                response.usage.input_tokens, response.usage.output_tokens, response.stop_reason,
             )
 
             # Process response content blocks
