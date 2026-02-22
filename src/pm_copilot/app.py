@@ -10,6 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import logging
 import streamlit as st
 from pm_copilot.state import init_session_state
+from pm_copilot.persistence import (
+    slugify_project_name, save_project, load_project, ensure_workspace_exists
+)
 
 logger = logging.getLogger("forge.app")
 from pm_copilot.orchestrator import run_turn
@@ -45,7 +48,59 @@ logger.info("App startup — session initialized")
 # --- Sidebar ---
 with st.sidebar:
     st.title("Forge")
-    st.caption("Orchestrator + Mode 1 + Mode 2")
+
+    # --- Project Management ---
+    workspace_dir = ensure_workspace_exists()
+
+    # List existing projects
+    existing_projects = sorted(
+        [d.name for d in workspace_dir.iterdir() if d.is_dir() and (d / "state.json").exists()],
+        key=lambda x: (workspace_dir / x / "state.json").stat().st_mtime,
+        reverse=True,
+    )
+
+    project_options = ["— Select a project —"] + existing_projects
+
+    selected = st.selectbox("Project", project_options, key="project_selector")
+
+    # New project creation
+    col1, col2 = st.columns(2)
+    with col1:
+        new_name = st.text_input("New project name", key="new_project_name", label_visibility="collapsed", placeholder="New project name...")
+    with col2:
+        if st.button("Create", use_container_width=True):
+            if new_name.strip():
+                slug = slugify_project_name(new_name)
+                project_dir = workspace_dir / slug
+                if project_dir.exists():
+                    st.error(f"Project '{slug}' already exists.")
+                else:
+                    project_dir.mkdir(parents=True)
+                    (project_dir / "artifacts").mkdir()
+                    for key in list(st.session_state.keys()):
+                        del st.session_state[key]
+                    init_session_state()
+                    st.session_state.project_name = new_name.strip()
+                    st.session_state.project_dir = project_dir
+                    st.session_state.is_priming_turn = True
+                    save_project(project_dir)
+                    st.session_state.project_selector = slug
+                    st.rerun()
+
+    # Load selected project
+    if selected != "— Select a project —":
+        project_dir = workspace_dir / selected
+        current_dir = getattr(st.session_state, 'project_dir', None)
+        if current_dir != project_dir:
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            load_project(project_dir)
+            st.session_state.project_selector = selected
+            st.rerun()
+
+    # Show current project info
+    if hasattr(st.session_state, 'project_name') and st.session_state.project_name:
+        st.caption(f"Current: **{st.session_state.project_name}**")
 
     st.divider()
 
@@ -161,13 +216,6 @@ with st.sidebar:
             use_container_width=True,
         )
 
-    # Reset button
-    st.divider()
-    if st.button("New Session", use_container_width=True):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
-
     # Modes roadmap
     st.divider()
     st.subheader("Modes")
@@ -184,6 +232,14 @@ st.title("Forge")
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
+
+# Priming turn: auto-send context-gathering message for new projects
+if st.session_state.get("is_priming_turn") and not st.session_state.messages:
+    with st.chat_message("assistant"):
+        with st.spinner("Setting up project..."):
+            priming_response = run_turn("__PRIMING_TURN__")
+        st.markdown(priming_response)
+    st.rerun()
 
 # Show question checkboxes if the last assistant response had questions
 pending_qs = st.session_state.pending_questions

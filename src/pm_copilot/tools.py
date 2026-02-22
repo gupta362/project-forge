@@ -1,6 +1,8 @@
 import logging
 import streamlit as st
 
+from .persistence import _write_context_file
+
 logger = logging.getLogger("forge.tools")
 
 
@@ -389,11 +391,25 @@ def _handle_generate_artifact(input: dict) -> str:
     """Dispatch to the appropriate artifact renderer."""
     artifact_type = input["artifact_type"]
     if artifact_type == "problem_brief":
-        return _render_problem_brief()
+        doc = _render_problem_brief()
     elif artifact_type == "solution_evaluation_brief":
-        return _render_solution_evaluation_brief()
+        doc = _render_solution_evaluation_brief()
     else:
         return f"Unknown artifact type: {artifact_type}"
+
+    # Auto-save artifact to project directory (skip validation warnings)
+    if not doc.startswith("WARNING:") and hasattr(st.session_state, 'project_dir') and st.session_state.project_dir:
+        artifacts_dir = st.session_state.project_dir / "artifacts"
+        artifacts_dir.mkdir(exist_ok=True)
+        if artifact_type == "problem_brief":
+            filename = "problem_brief.md"
+        elif artifact_type == "solution_evaluation_brief":
+            filename = "solution_evaluation.md"
+        else:
+            filename = f"{artifact_type}.md"
+        (artifacts_dir / filename).write_text(doc)
+
+    return doc
 
 
 def _render_problem_brief() -> str:
@@ -677,4 +693,7 @@ def _handle_update_org_context(input: dict) -> str:
         else:
             ctx["internal_context"] = input["internal_context"]
     ctx["enrichment_count"] += 1
+    # Write context.md if we have a project directory
+    if hasattr(st.session_state, 'project_dir') and st.session_state.project_dir:
+        _write_context_file(st.session_state.project_dir)
     return f"Org context updated for {input.get('company', 'unknown')} / {input.get('domain', 'unknown')}"

@@ -16,6 +16,7 @@ from .mode1_knowledge import MODE1_KNOWLEDGE
 from .mode2_knowledge import MODE2_KNOWLEDGE
 from .org_context import format_org_context
 from .config import MODEL_NAME
+from .persistence import save_project, _load_context_file
 from .logging_config import setup_logging
 logger = setup_logging()
 
@@ -28,11 +29,35 @@ def run_turn(user_message: str) -> str:
     Process one user turn through the two-phase architecture.
     Returns the assistant's response text.
     """
+    if user_message == "__PRIMING_TURN__":
+        st.session_state.turn_count += 1
+        priming_msg = (
+            "New project started. Before we dig into a specific problem, give me the lay of the land.\n\n"
+            "Tell me about the team and context for this project:\n"
+            "- Who's the team? What does everyone do?\n"
+            "- Key stakeholders and decision-makers?\n"
+            "- Systems, tools, or data sources they work with?\n"
+            "- Any terminology I should know?\n"
+            "- Current objectives or priorities?\n"
+            "- Known challenges or political dynamics?\n\n"
+            "The more context I have upfront, the sharper my diagnostic questions will be. "
+            "Or if you'd rather jump straight to the problem, go ahead — we can fill in context as we go."
+        )
+        st.session_state.messages.append({"role": "assistant", "content": priming_msg})
+        st.session_state.is_priming_turn = False
+        if hasattr(st.session_state, 'project_dir') and st.session_state.project_dir:
+            save_project(st.session_state.project_dir)
+        return priming_msg
+
     st.session_state.turn_count += 1
     logger.info("=== Turn %d start ===", st.session_state.turn_count)
 
     # Add user message to history
     st.session_state.messages.append({"role": "user", "content": user_message})
+
+    # Re-read context.md to capture manual edits
+    if hasattr(st.session_state, 'project_dir') and st.session_state.project_dir:
+        _load_context_file(st.session_state.project_dir)
 
     # --- PHASE A: Route ---
     routing_decision = _run_phase_a(user_message)
@@ -45,6 +70,11 @@ def run_turn(user_message: str) -> str:
 
     # --- POST-TURN: Update routing context ---
     _post_turn_updates(routing_decision)
+
+    # Auto-save project state
+    if hasattr(st.session_state, 'project_dir') and st.session_state.project_dir:
+        save_project(st.session_state.project_dir)
+        logger.info("Auto-saved state to %s", st.session_state.project_dir)
 
     return response_text
 
