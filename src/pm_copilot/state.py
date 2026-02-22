@@ -69,3 +69,6 @@ def init_session_state():
         }
         st.session_state.latest_artifact = None  # Rendered markdown from generate_artifact
         st.session_state.pending_questions = None  # Questions from latest assistant response for checkbox UI
+        st.session_state.project_name = None
+        st.session_state.project_dir = None
+        st.session_state.is_priming_turn = False
