@@ -16,6 +16,8 @@ from .mode1_knowledge import MODE1_KNOWLEDGE
 from .mode2_knowledge import MODE2_KNOWLEDGE
 from .org_context import format_org_context
 from .config import MODEL_NAME
+import logging
+logger = logging.getLogger(__name__)
 
 
 client = Anthropic()
@@ -222,7 +224,7 @@ def _run_phase_b(routing_decision: dict) -> str:
         while True:
             response = client.messages.create(
                 model=MODEL_NAME,
-                max_tokens=4096,
+                max_tokens=8096,
                 system=SYSTEM_PROMPT,
                 messages=api_messages,
                 tools=TOOL_DEFINITIONS,
@@ -265,6 +267,11 @@ def _run_phase_b(routing_decision: dict) -> str:
             final_text += "\n\n---\n⚠️ I encountered an error mid-response. What I've shared above is still valid. Please try sending your next message and I'll continue."
         else:
             final_text = "I hit a temporary issue processing your message. Your conversation is preserved — please try again."
+
+    # Safety net: if tool calls consumed all tokens and no text was generated
+    if not final_text.strip():
+        logger.warning("Phase B returned empty response — likely token exhaustion from tool calls")
+        final_text = "I processed your input but couldn't generate a visible response. This usually means the analysis was very detailed — please try asking a follow-up question."
 
     return final_text
 
