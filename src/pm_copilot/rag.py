@@ -1,0 +1,324 @@
+"""RAG module — embedding, vector storage, retrieval for Forge projects."""
+
+import json
+import logging
+from pathlib import Path
+
+import chromadb
+import voyageai
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from voyageai.error import RateLimitError, ServerError
+
+from . import config
+from .chunking import process_file
+
+logger = logging.getLogger("forge.rag")
+
+
+# ---------------------------------------------------------------------------
+# Module-level factory functions — wrapped with @st.cache_resource in app.py
+# ---------------------------------------------------------------------------
+
+def _create_chroma_client(vectordb_path: str) -> chromadb.PersistentClient:
+    """Create ChromaDB client. Called via @st.cache_resource in app.py."""
+    return chromadb.PersistentClient(path=vectordb_path)
+
+
+def _create_voyage_client(api_key: str) -> voyageai.Client:
+    """Create Voyage AI client. Called via @st.cache_resource in app.py."""
+    return voyageai.Client(api_key=api_key)
+
+
+# ---------------------------------------------------------------------------
+# ForgeRAG
+# ---------------------------------------------------------------------------
+
+class ForgeRAG:
+    """Manages vector storage and retrieval for a Forge project."""
+
+    def __init__(
+        self,
+        project_dir: Path,
+        chroma_client: chromadb.PersistentClient,
+        voyage_client: voyageai.Client | None,
+    ):
+        """Initialize RAG for a project.
+
+        IMPORTANT: Do NOT create ChromaDB or Voyage clients here.
+        Clients must be passed in as pre-initialized singletons
+        (cached via @st.cache_resource in app.py) to avoid
+        Streamlit thread-lock issues with SQLite.
+        """
+        self.project_dir = project_dir
+        self.client = chroma_client
+        self.voyage = voyage_client
+        self.enabled = voyage_client is not None
+
+        # Get or create collections
+        self.documents = self.client.get_or_create_collection(
+            name="documents",
+            metadata={"hnsw:space": "cosine"},
+        )
+        self.conversations = self.client.get_or_create_collection(
+            name="conversations",
+            metadata={"hnsw:space": "cosine"},
+        )
+
+        if not self.enabled:
+            logger.warning("Voyage client not provided — RAG retrieval disabled")
+        else:
+            logger.info("ForgeRAG initialized for %s", project_dir)
+
+    # -------------------------------------------------------------------
+    # Embedding
+    # -------------------------------------------------------------------
+
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        stop=stop_after_attempt(5),
+        retry=retry_if_exception_type((RateLimitError, ServerError)),
+    )
+    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Embed a single batch with retry/backoff for rate limits."""
+        result = self.voyage.embed(
+            texts,
+            model=config.EMBEDDING_MODEL,
+            output_dimension=config.EMBEDDING_DIMENSIONS,
+        )
+        return result.embeddings
+
+    def _embed(self, texts: list[str]) -> list[list[float]]:
+        """Embed texts with batching and rate-limit handling.
+
+        Splits into batches of 128 (Voyage's max) and retries each batch
+        with exponential backoff on 429/5xx errors.
+        """
+        BATCH_SIZE = 128
+        all_embeddings: list[list[float]] = []
+        for i in range(0, len(texts), BATCH_SIZE):
+            batch = texts[i : i + BATCH_SIZE]
+            batch_embeddings = self._embed_batch(batch)
+            all_embeddings.extend(batch_embeddings)
+        return all_embeddings
+
+    # -------------------------------------------------------------------
+    # Document ingestion
+    # -------------------------------------------------------------------
+
+    def ingest_file(self, file_path: Path, file_summary: str) -> int:
+        """Ingest a file into the documents collection.
+
+        Returns number of chunks stored.
+        """
+        chunks = process_file(file_path)
+        if not chunks:
+            logger.warning("No chunks produced from %s", file_path.name)
+            return 0
+
+        source_filename = file_path.name
+
+        # Prepare texts for embedding (context header + chunk text)
+        texts = [f"{c['context_header']}\n{c['text']}" for c in chunks]
+
+        # Embed
+        embeddings = self._embed(texts)
+
+        # Build ChromaDB add arguments
+        ids = [f"{source_filename}_chunk_{i}" for i in range(len(chunks))]
+        metadatas = [
+            {
+                "source_filename": source_filename,
+                "header_path": json.dumps(c["header_path"]),
+                "context_header": c["context_header"],
+                "parent_text": c["parent_text"],
+                "parent_id": c["parent_id"],
+                "leaf_index": c["leaf_index"],
+            }
+            for c in chunks
+        ]
+
+        self.documents.add(
+            ids=ids,
+            embeddings=embeddings,
+            documents=texts,
+            metadatas=metadatas,
+        )
+
+        logger.info("Ingested %s: %d chunks", source_filename, len(chunks))
+        return len(chunks)
+
+    def remove_file(self, filename: str) -> int:
+        """Remove all chunks for a given filename from documents collection."""
+        # Query to find matching IDs
+        results = self.documents.get(
+            where={"source_filename": filename},
+        )
+        ids_to_delete = results["ids"]
+        if ids_to_delete:
+            self.documents.delete(ids=ids_to_delete)
+        count = len(ids_to_delete)
+        logger.info("Removed %s: %d chunks deleted", filename, count)
+        return count
+
+    # -------------------------------------------------------------------
+    # Conversation indexing
+    # -------------------------------------------------------------------
+
+    def index_turn(
+        self,
+        turn_number: int,
+        user_message: str,
+        assistant_response: str,
+        turn_summary: str,
+        active_probe: str,
+        active_mode: str,
+    ) -> None:
+        """Index a completed conversation turn."""
+        embedding = self._embed([turn_summary])[0]
+
+        self.conversations.upsert(
+            ids=[f"turn_{turn_number}"],
+            embeddings=[embedding],
+            documents=[turn_summary],
+            metadatas=[
+                {
+                    "turn_number": turn_number,
+                    "active_probe": active_probe or "",
+                    "active_mode": active_mode or "",
+                    "user_message": user_message,
+                    "assistant_response": assistant_response,
+                }
+            ],
+        )
+
+        logger.info("Indexed turn %d", turn_number)
+
+    # -------------------------------------------------------------------
+    # Retrieval
+    # -------------------------------------------------------------------
+
+    def retrieve_documents(
+        self,
+        query: str,
+        n_results: int | None = None,
+        filename_filter: str | None = None,
+    ) -> list[dict]:
+        """Retrieve relevant document chunks, deduplicated by parent.
+
+        Returns list of dicts with: parent_text, context_header,
+        source_filename, score.
+        """
+        if not self.enabled:
+            return []
+
+        if self.documents.count() == 0:
+            return []
+
+        n = n_results or config.MAX_DOCUMENT_RESULTS
+        query_embedding = self._embed([query])[0]
+
+        # Build query kwargs
+        query_kwargs: dict = {
+            "query_embeddings": [query_embedding],
+            "n_results": min(n * 2, self.documents.count()),  # over-fetch for dedup
+        }
+        if filename_filter:
+            query_kwargs["where"] = {"source_filename": filename_filter}
+
+        results = self.documents.query(**query_kwargs)
+
+        # Deduplicate by parent_id — keep the best-scoring leaf per parent
+        seen_parents: set[str] = set()
+        deduped: list[dict] = []
+
+        if results["ids"] and results["ids"][0]:
+            metadatas = results["metadatas"][0]
+            distances = results["distances"][0]
+
+            for meta, distance in zip(metadatas, distances):
+                parent_id = meta["parent_id"]
+                if parent_id in seen_parents:
+                    continue
+                seen_parents.add(parent_id)
+                # ChromaDB returns distances (lower = closer for cosine)
+                score = 1.0 - distance
+                deduped.append(
+                    {
+                        "parent_text": meta["parent_text"],
+                        "context_header": meta["context_header"],
+                        "source_filename": meta["source_filename"],
+                        "score": score,
+                    }
+                )
+                if len(deduped) >= n:
+                    break
+
+        # Sort by score descending
+        deduped.sort(key=lambda x: x["score"], reverse=True)
+        return deduped
+
+    def retrieve_conversations(
+        self,
+        query: str,
+        current_turn: int,
+        n_results: int | None = None,
+        probe_filter: str | None = None,
+    ) -> list[dict]:
+        """Retrieve relevant older conversation turns.
+
+        Returns list of dicts sorted by turn_number ascending (chronological).
+        """
+        if not self.enabled:
+            return []
+
+        if self.conversations.count() == 0:
+            return []
+
+        n = n_results or config.MAX_CONVERSATION_RESULTS
+        threshold = current_turn - config.ALWAYS_ON_TURN_WINDOW
+
+        if threshold <= 0:
+            return []  # Not enough history to retrieve from
+
+        query_embedding = self._embed([query])[0]
+
+        # Build where filter
+        if probe_filter:
+            where_filter = {
+                "$and": [
+                    {"turn_number": {"$lt": threshold}},
+                    {"active_probe": probe_filter},
+                ]
+            }
+        else:
+            where_filter = {"turn_number": {"$lt": threshold}}
+
+        # Clamp n_results to available count
+        available = self.conversations.count()
+
+        results = self.conversations.query(
+            query_embeddings=[query_embedding],
+            n_results=min(n, available),
+            where=where_filter,
+        )
+
+        turns: list[dict] = []
+        if results["ids"] and results["ids"][0]:
+            metadatas = results["metadatas"][0]
+            distances = results["distances"][0]
+
+            for meta, distance in zip(metadatas, distances):
+                score = 1.0 - distance
+                turns.append(
+                    {
+                        "turn_number": meta["turn_number"],
+                        "active_probe": meta["active_probe"],
+                        "user_message": meta["user_message"],
+                        "assistant_response": meta["assistant_response"],
+                        "score": score,
+                    }
+                )
+
+        # Sort chronologically
+        turns.sort(key=lambda x: x["turn_number"])
+        return turns
