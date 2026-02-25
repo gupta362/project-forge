@@ -696,4 +696,16 @@ def _handle_update_org_context(input: dict) -> str:
     # Write context.md if we have a project directory
     if hasattr(st.session_state, 'project_dir') and st.session_state.project_dir:
         _write_context_file(st.session_state.project_dir)
+    # Sync to project_state for RAG context assembly
+    if hasattr(st.session_state, 'project_state'):
+        parts = []
+        if ctx.get("company"):
+            parts.append(ctx["company"])
+        if ctx.get("last_enriched_domain"):
+            parts.append(f"Domain: {ctx['last_enriched_domain']}")
+        if ctx.get("public_context"):
+            parts.append(ctx["public_context"])
+        if ctx.get("internal_context"):
+            parts.append(ctx["internal_context"])
+        st.session_state.project_state["org_context"] = "\n".join(parts)
     return f"Org context updated for {input.get('company', 'unknown')} / {input.get('domain', 'unknown')}"

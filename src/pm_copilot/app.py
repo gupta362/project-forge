@@ -213,6 +213,15 @@ with st.sidebar:
                 del st.session_state[key]
             load_project(project_dir)
             st.session_state.project_state = load_project_state(project_dir)
+            # Reconnect RAG to existing ChromaDB data
+            try:
+                chroma = get_chroma_client(str(project_dir / "vectordb"))
+                voyage = get_voyage_client(config.VOYAGE_API_KEY) if config.VOYAGE_API_KEY else None
+                st.session_state.rag = ForgeRAG(
+                    project_dir, chroma_client=chroma, voyage_client=voyage,
+                )
+            except Exception as e:
+                logger.warning("RAG init on project load failed: %s", e)
             st.session_state.project_selector = selected
             st.rerun()
 
