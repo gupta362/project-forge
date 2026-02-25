@@ -1,4 +1,14 @@
-MODE2_KNOWLEDGE = """
+# mode2_knowledge.py — Decomposed for RAG-based selective injection
+#
+# Four exports:
+#   MODE2_CORE_INSTRUCTIONS — always sent to Phase B (behavioral meta-rules)
+#   MODE2_PROBES            — dict keyed by probe name, looked up via Phase A routing
+#   MODE2_RISK_FRAMEWORK    — Cagan four-risk-dimension framework (always included in Mode 2)
+#   MODE2_PATTERNS          — dict keyed by pattern name, looked up via Phase A routing
+#
+# Plus backward-compatible MODE2_KNOWLEDGE that joins everything (removed after orchestrator refactor).
+
+MODE2_CORE_INSTRUCTIONS = """
 # Mode 2: Evaluate Solution — Specification
 
 ## 0. How This Fits Into the System
@@ -72,226 +82,9 @@ If Mode 2 is entered WITHOUT Mode 1 (user claims problem is already validated):
 
 ---
 
-## 4. Risk Identification Approach
-
-### 4.1 Three-Layer Risk Identification
-
-Mode 2 surfaces risks from three sources, in order of specificity:
-
-**Layer 1: Conversation-derived risks**
-Risks that emerge directly from what the user has said. Example: user mentions "we'll need data from the partner team" → dependency risk on an external team.
-
-**Layer 2: Org-context-derived risks**
-Risks from organizational patterns, history, and constraints captured in org context or surfaced by Mode 1. Example: org context indicates the organization has historically struggled with cross-team integrations → heightened integration risk.
-
-**Layer 3: Domain-expert-derived risks (Claude's subject matter knowledge)**
-Risks the system proactively surfaces based on the solution type × domain intersection, using Claude's training knowledge — even if nobody in the conversation mentioned them.
-
-**Instructions for the knowledge base (how to activate Layer 3):**
-
-The knowledge base will NOT enumerate risks by domain. Instead, it will contain instructions like:
-
-> After identifying the solution type (ML model, data pipeline, customer-facing tool, internal platform, integration, etc.) and the operating domain (marketing, supply chain, finance, retail operations, R&D, etc.), use your subject matter expertise to generate 6-8 risks specific to this combination. Then prioritize and surface only the 3-4 highest-impact, least-obvious ones to the user.
-
-**Quality bar — two examples of the difference:**
-
-BAD (generic): "You should consider model scalability and data quality."
-
-GOOD (domain-expert): "ML models in demand forecasting commonly degrade during promotional periods because the training data distribution shifts significantly. Has the team accounted for how the model handles promotional events versus baseline periods? This is a well-known failure mode in retail forecasting that often doesn't surface until the first major promotional cycle after launch."
-
-BAD (generic): "Consider user adoption challenges."
-
-GOOD (domain-expert): "Marketing teams typically have deeply embedded workflows around campaign planning tools. Solutions that require marketers to check a separate dashboard or change their planning sequence face much higher adoption friction than solutions that integrate into existing tools like their campaign management platform. Where does this solution sit relative to their current daily workflow?"
-
-**Prioritization rule:**
-- Skip risks the PM has likely already considered (obvious ones)
-- Lead with risks that are domain-specific or solution-type-specific and easy to miss
-- Register all identified risks as assumptions with confidence "guessed" and recommended validation actions — the system isn't claiming these are definitive, it's saying "based on solutions like this in domains like this, these are worth investigating"
-
-**Cognitive load rule (same as Mode 1):**
-- Surface max 3-4 risks per turn
-- The system may internally identify 8-10 risks but holds the lower-priority ones for later turns
-- Bring forward additional risks only when they become relevant based on what the user reveals
-
-### 4.2 Diagnostic Probes
-
-Seven probes for solution evaluation. Like Mode 1, not every probe fires for every input.
-
-### Probe 1: Solution-Problem Fit
-
-**Purpose:** Does this solution actually solve the validated problem? This sounds obvious but is the #1 failure mode — solutions evolve during discussion and quietly decouple from the original problem.
-
-**When it fires:** Always runs first (same as Mode 1's Probe 1 is always-first).
-
-**What it checks:**
-- Does the proposed solution address the root cause identified in Mode 1, or a symptom?
-- Has the solution scope expanded beyond the original problem scope?
-- Are there aspects of the validated problem that this solution doesn't address?
-- Are there things this solution does that aren't related to the validated problem (scope creep)?
-
-**Completion criteria:** An explicit statement mapping solution capabilities → validated problem elements, with gaps identified.
-
-**Example:**
-> Mode 1 validated: "Campaign managers estimate performance manually with 30-40% error rates."
-> Proposed solution: "Build a digital twin simulation engine."
-> Fit check: The simulation engine addresses the accuracy gap, but doesn't address the trust gap (campaign managers may not trust model predictions over their judgment). The solution also includes scenario testing capabilities that weren't part of the original problem — is that intentional scope expansion or creep?
-
-### Probe 2: Value Risk
-
-**Purpose:** Will the target users actually choose to use this? Having a real problem doesn't guarantee adoption of a specific solution.
-
-**When it fires:** Always (this is Cagan's first risk dimension).
-
-**What it checks:**
-- Is there evidence that users want THIS solution, not just relief from the problem?
-- What's the switching cost from their current approach? (Even a bad manual process has zero learning curve)
-- Would users need to change their workflow to use this? How much?
-- Is the value proposition clear enough that users could explain it to a colleague?
-
-**Key questions to explore:**
-- "If this existed tomorrow, what would [target user] do differently on Monday morning?"
-- "What's the minimum this needs to do to be worth switching from the current approach?"
-- "Who tried to solve this before, and what happened?" (Prior failed attempts reveal adoption barriers)
-
-**Completion criteria:** Either evidence of user demand for this approach, or identification of the adoption risk with a recommended validation step.
-
-### Probe 3: Usability Risk
-
-**Purpose:** Can the target users actually figure this out and integrate it into their work?
-
-**When it fires:** When the solution involves a user-facing component (skip for pure backend/infrastructure solutions).
-
-**What it checks:**
-- Who are the actual end users? (Not the sponsor — the person using it daily)
-- What's their technical sophistication?
-- Does this replace an existing tool/workflow, or add a new one? (Adding is harder than replacing)
-- What's the "last mile" — how does output from this tool actually influence a decision?
-
-**Key questions to explore:**
-- "Walk me through how [user] would use this in their actual workflow. What do they do before, during, and after?"
-- "What happens if the tool gives a result the user disagrees with? Do they override it?"
-- "Is there a simpler version of this that would capture 80% of the value?"
-
-**Completion criteria:** A workflow integration assessment — how this fits into existing work patterns, or what changes are required.
-
-### Probe 4: Feasibility Risk
-
-**Purpose:** Can this actually be built with the available resources, data, and technology?
-
-**When it fires:** Always (but depth varies — if the user has a strong technical team and the approach is well-understood, this can be brief).
-
-**What it checks:**
-- Does the required data exist, is it accessible, and is it clean enough?
-- Does the team have the skills to build this? (Or does it depend on 1-2 key people?)
-- Is this a known-solvable problem (engineering) or an unknown (research)?
-- What's the realistic timeline? (Compare against organizational patience)
-- Are there infrastructure dependencies?
-
-**Key questions to explore:**
-- "What's the hardest technical problem in this solution? Is that solved or unsolved?"
-- "If the key technical person left tomorrow, could someone else continue this?"
-- "What data does this need that you don't currently have access to?"
-
-**Completion criteria:** Classification of technical risk as low (engineering problem, known approach), medium (some unknowns, but manageable), or high (research problem, uncertain if solvable). With specific unknowns identified.
-
-**Feasibility confidence guardrail:** The system cannot validate technical feasibility — it can only surface the right questions. If no named technical stakeholder has confirmed feasibility, register any feasibility assessment as confidence "guessed" regardless of how plausible the approach sounds. A solution that "sounds feasible" based on textbook knowledge is not the same as one confirmed by someone who knows the codebase, the tech debt, and the team's actual capabilities.
-
-### Probe 5: Viability Risk
-
-**Purpose:** Does this make business sense? Can the organization afford to build, launch, and maintain it?
-
-**When it fires:** Always, but especially deep when the solution requires significant investment or organizational change.
-
-**What it checks:**
-- What's the total cost of ownership (build + maintain + support)?
-- Does this align with current organizational priorities and budget cycles?
-- Who needs to approve this, and what's their appetite for this type of investment?
-- Is there a sustainable model for maintaining this after launch? (Or does it become shelfware?)
-- Does this create dependencies on external vendors or partners?
-- **Cannibalization check:** Does this solution's success for one stakeholder create losses for another? Especially in multi-sided business models (e.g., optimizing CPG campaign spend could erode Kroger's private label margin; maximizing ad revenue could degrade shopper experience). This is distinct from anti-metrics — anti-metrics track what shouldn't get worse within the same stakeholder's domain; cannibalization tracks cross-stakeholder value transfer.
-
-**Key questions to explore:**
-- "Who approves the budget for this, and what's their decision timeline?"
-- "What happens to this product in 2 years? Who maintains it?"
-- "Does this compete with any other initiative for the same resources?"
-
-**Completion criteria:** Assessment of organizational alignment and sustainability, with specific approval gates identified.
-
-### Probe 6: Build vs. Buy vs. Partner
-
-**Purpose:** Has the user considered that building from scratch may not be the right approach?
-
-**When it fires:** When the proposed solution is a custom build. Suppress if the user has already evaluated alternatives or if the solution is clearly unique to their context.
-
-**What it checks:**
-- Are there existing products or platforms that solve this or something close?
-- What's the total cost of building vs. licensing vs. partnering?
-- What's the maintenance burden of a custom build vs. a managed solution?
-- Is the differentiation in the solution itself, or in how it's applied? (If the latter, buy the platform and customize the application)
-
-**Key questions to explore:**
-- "Have you looked at what's available on the market for this?"
-- "What part of this solution is truly unique to your context vs. a general capability?"
-- "If a vendor could get you 70% of the way there, would that be worth exploring?"
-
-**Completion criteria:** Either a justified build decision (with reasoning for why buy/partner won't work) or a recommendation to evaluate alternatives.
-
-**Vendor knowledge guardrail:** Do not recommend specific vendors or products. The system's knowledge of the vendor landscape may be outdated. Instead, help the PM define evaluation criteria for vendor assessment and ask whether they've done a current market scan. The output of this probe should be a decision framework ("here's how to evaluate build vs. buy for this specific case"), not vendor recommendations.
-
-### Probe 7: Validation Approach
-
-**Purpose:** What's the fastest, cheapest way to test the riskiest assumptions before committing to a full build?
-
-**When it fires:** After the other probes have identified the key risks. This is typically the last probe.
-
-**What it checks:**
-- What's the single riskiest assumption? (From the assumption register)
-- What's the cheapest experiment that would validate or invalidate it?
-- What prototype fidelity is appropriate? Options:
-  - **Painted door test:** Fake the feature, measure demand (tests value risk)
-  - **Concierge MVP:** Do it manually for a few users, learn what actually matters (tests value + usability risk)
-  - **Technical spike:** Build the hardest part first, see if it works (tests feasibility risk)
-  - **Wizard of Oz:** User thinks it's automated, human does it behind the scenes (tests value + usability without feasibility investment)
-  - **Clickable prototype:** Non-functional mockup for user feedback (tests usability risk)
-
-**Key questions to explore:**
-- "What's the one thing that, if it turned out to be wrong, would kill this project?"
-- "Can we test that assumption in under 2 weeks with minimal investment?"
-- "What would 'good enough evidence' look like to proceed to full build?"
-
-**Completion criteria:** A specific validation recommendation with approach, timeline, and success criteria.
-
----
-
 ## 5. Domain Patterns for Mode 2
 
-Mode 1's 8 domain patterns are problem-discovery patterns. Mode 2 needs solution-evaluation patterns. Some Mode 1 patterns carry forward (Analytics-Execution Gap is relevant to feasibility), but Mode 2 adds these:
-
-### Pattern 1: "Build It and They Will Come"
-**Trigger:** ALL: custom build proposed + no distribution/adoption plan + users not involved in design
-**Why it exists:** Technical teams often focus on building the capability and assume users will adopt it because the problem is real. But adoption requires change management, training, workflow integration, and often organizational incentives. Failure to plan for adoption is the #1 reason technically successful projects fail to deliver value.
-**What it does:** Registers a high-impact assumption: "target users will adopt this without a dedicated adoption plan." Asks about distribution strategy, change management, and user involvement in design.
-
-### Pattern 2: "V1 Overengineering"
-**Trigger:** ALL: first version + >6 month timeline + no prior validation
-**Why it exists:** Teams sometimes design V1 as a comprehensive platform when a narrower first version would validate the core hypothesis faster and cheaper. The risk is spending 12 months building something that misses the mark when a 6-week version would have revealed that.
-**What it does:** Asks: "What's the smallest version of this that would tell you if the approach works? Could you validate the core value proposition with a fraction of the planned scope?"
-
-### Pattern 3: "Data Optimism"
-**Trigger:** ANY: ML/AI-based solution, data pipeline dependency, "we have the data" without specifics
-**Why it exists:** Solutions involving data or ML almost always underestimate data preparation effort. "We have the data" usually means "the data exists somewhere" — not that it's accessible, clean, at the right granularity, or has sufficient history. This is the most common source of timeline overruns.
-**What it does:** Registers a feasibility assumption about data readiness. Asks: "Have you actually looked at this data? Is it at the granularity you need? How much cleaning/transformation is required? What's the historical depth?"
-
-### Pattern 4: "Key Person Dependency"
-**Trigger:** ALL: specialized technical approach + small team (<5) + timeline >6 months
-**Why it exists:** Complex technical solutions often depend on 1-2 people with specialized knowledge. If those people leave, get reassigned, or burn out, the project stalls. This risk increases with timeline length.
-**What it does:** Registers a feasibility risk about talent continuity. Asks about knowledge transfer plans, documentation practices, and whether the approach could be simplified to reduce single-point-of-failure risk.
-*Note: This overlaps with Mode 1's Pattern 5 (Talent Drain). If already fired in Mode 1, Mode 2 references the existing assumption rather than re-registering.*
-
-### Pattern 5: "Integration Underestimation"
-**Trigger:** ANY: connects to existing systems, replaces current tool, requires API/data integration
-**Why it exists:** New solutions rarely exist in isolation — they need to connect to existing tools, data sources, and workflows. Integration work is consistently underestimated because it involves negotiating with other teams, understanding undocumented dependencies, and working with systems you don't control.
-**What it does:** Asks: "What systems does this need to connect to? Who owns those systems? Have you discussed this integration with them? What's their roadmap and availability?"
+Mode 1's 8 domain patterns are problem-discovery patterns. Mode 2 needs solution-evaluation patterns. Some Mode 1 patterns carry forward (Analytics-Execution Gap is relevant to feasibility), but Mode 2 adds its own patterns.
 
 ---
 
@@ -556,3 +349,237 @@ Handler writes to: `go_no_go_recommendation`, `go_no_go_conditions`, `go_no_go_d
 *Depends on: Orchestrator + Mode 1 (implemented)*
 *Inherits: Assumption register, document skeleton, org context, stakeholder map from Mode 1*
 """
+
+# Three-layer risk identification framework — always included when Mode 2 is active.
+MODE2_RISK_FRAMEWORK = """
+## 4. Risk Identification Approach
+
+### 4.1 Three-Layer Risk Identification
+
+Mode 2 surfaces risks from three sources, in order of specificity:
+
+**Layer 1: Conversation-derived risks**
+Risks that emerge directly from what the user has said. Example: user mentions "we'll need data from the partner team" → dependency risk on an external team.
+
+**Layer 2: Org-context-derived risks**
+Risks from organizational patterns, history, and constraints captured in org context or surfaced by Mode 1. Example: org context indicates the organization has historically struggled with cross-team integrations → heightened integration risk.
+
+**Layer 3: Domain-expert-derived risks (Claude's subject matter knowledge)**
+Risks the system proactively surfaces based on the solution type × domain intersection, using Claude's training knowledge — even if nobody in the conversation mentioned them.
+
+**Instructions for the knowledge base (how to activate Layer 3):**
+
+The knowledge base will NOT enumerate risks by domain. Instead, it will contain instructions like:
+
+> After identifying the solution type (ML model, data pipeline, customer-facing tool, internal platform, integration, etc.) and the operating domain (marketing, supply chain, finance, retail operations, R&D, etc.), use your subject matter expertise to generate 6-8 risks specific to this combination. Then prioritize and surface only the 3-4 highest-impact, least-obvious ones to the user.
+
+**Quality bar — two examples of the difference:**
+
+BAD (generic): "You should consider model scalability and data quality."
+
+GOOD (domain-expert): "ML models in demand forecasting commonly degrade during promotional periods because the training data distribution shifts significantly. Has the team accounted for how the model handles promotional events versus baseline periods? This is a well-known failure mode in retail forecasting that often doesn't surface until the first major promotional cycle after launch."
+
+BAD (generic): "Consider user adoption challenges."
+
+GOOD (domain-expert): "Marketing teams typically have deeply embedded workflows around campaign planning tools. Solutions that require marketers to check a separate dashboard or change their planning sequence face much higher adoption friction than solutions that integrate into existing tools like their campaign management platform. Where does this solution sit relative to their current daily workflow?"
+
+**Prioritization rule:**
+- Skip risks the PM has likely already considered (obvious ones)
+- Lead with risks that are domain-specific or solution-type-specific and easy to miss
+- Register all identified risks as assumptions with confidence "guessed" and recommended validation actions — the system isn't claiming these are definitive, it's saying "based on solutions like this in domains like this, these are worth investigating"
+
+**Cognitive load rule (same as Mode 1):**
+- Surface max 3-4 risks per turn
+- The system may internally identify 8-10 risks but holds the lower-priority ones for later turns
+- Bring forward additional risks only when they become relevant based on what the user reveals
+
+### 4.2 Diagnostic Probes
+
+Seven probes for solution evaluation. Like Mode 1, not every probe fires for every input.
+"""
+
+# Probe definitions — looked up by key based on Phase A's next_probe output.
+# Keys are descriptive names matching the probe's focus area.
+MODE2_PROBES = {
+    "Solution-Problem Fit": """### Probe 1: Solution-Problem Fit
+
+**Purpose:** Does this solution actually solve the validated problem? This sounds obvious but is the #1 failure mode — solutions evolve during discussion and quietly decouple from the original problem.
+
+**When it fires:** Always runs first (same as Mode 1's Probe 1 is always-first).
+
+**What it checks:**
+- Does the proposed solution address the root cause identified in Mode 1, or a symptom?
+- Has the solution scope expanded beyond the original problem scope?
+- Are there aspects of the validated problem that this solution doesn't address?
+- Are there things this solution does that aren't related to the validated problem (scope creep)?
+
+**Completion criteria:** An explicit statement mapping solution capabilities → validated problem elements, with gaps identified.
+
+**Example:**
+> Mode 1 validated: "Campaign managers estimate performance manually with 30-40% error rates."
+> Proposed solution: "Build a digital twin simulation engine."
+> Fit check: The simulation engine addresses the accuracy gap, but doesn't address the trust gap (campaign managers may not trust model predictions over their judgment). The solution also includes scenario testing capabilities that weren't part of the original problem — is that intentional scope expansion or creep?""",
+
+    "Value Risk": """### Probe 2: Value Risk
+
+**Purpose:** Will the target users actually choose to use this? Having a real problem doesn't guarantee adoption of a specific solution.
+
+**When it fires:** Always (this is Cagan's first risk dimension).
+
+**What it checks:**
+- Is there evidence that users want THIS solution, not just relief from the problem?
+- What's the switching cost from their current approach? (Even a bad manual process has zero learning curve)
+- Would users need to change their workflow to use this? How much?
+- Is the value proposition clear enough that users could explain it to a colleague?
+
+**Key questions to explore:**
+- "If this existed tomorrow, what would [target user] do differently on Monday morning?"
+- "What's the minimum this needs to do to be worth switching from the current approach?"
+- "Who tried to solve this before, and what happened?" (Prior failed attempts reveal adoption barriers)
+
+**Completion criteria:** Either evidence of user demand for this approach, or identification of the adoption risk with a recommended validation step.""",
+
+    "Usability Risk": """### Probe 3: Usability Risk
+
+**Purpose:** Can the target users actually figure this out and integrate it into their work?
+
+**When it fires:** When the solution involves a user-facing component (skip for pure backend/infrastructure solutions).
+
+**What it checks:**
+- Who are the actual end users? (Not the sponsor — the person using it daily)
+- What's their technical sophistication?
+- Does this replace an existing tool/workflow, or add a new one? (Adding is harder than replacing)
+- What's the "last mile" — how does output from this tool actually influence a decision?
+
+**Key questions to explore:**
+- "Walk me through how [user] would use this in their actual workflow. What do they do before, during, and after?"
+- "What happens if the tool gives a result the user disagrees with? Do they override it?"
+- "Is there a simpler version of this that would capture 80% of the value?"
+
+**Completion criteria:** A workflow integration assessment — how this fits into existing work patterns, or what changes are required.""",
+
+    "Feasibility Risk": """### Probe 4: Feasibility Risk
+
+**Purpose:** Can this actually be built with the available resources, data, and technology?
+
+**When it fires:** Always (but depth varies — if the user has a strong technical team and the approach is well-understood, this can be brief).
+
+**What it checks:**
+- Does the required data exist, is it accessible, and is it clean enough?
+- Does the team have the skills to build this? (Or does it depend on 1-2 key people?)
+- Is this a known-solvable problem (engineering) or an unknown (research)?
+- What's the realistic timeline? (Compare against organizational patience)
+- Are there infrastructure dependencies?
+
+**Key questions to explore:**
+- "What's the hardest technical problem in this solution? Is that solved or unsolved?"
+- "If the key technical person left tomorrow, could someone else continue this?"
+- "What data does this need that you don't currently have access to?"
+
+**Completion criteria:** Classification of technical risk as low (engineering problem, known approach), medium (some unknowns, but manageable), or high (research problem, uncertain if solvable). With specific unknowns identified.
+
+**Feasibility confidence guardrail:** The system cannot validate technical feasibility — it can only surface the right questions. If no named technical stakeholder has confirmed feasibility, register any feasibility assessment as confidence "guessed" regardless of how plausible the approach sounds. A solution that "sounds feasible" based on textbook knowledge is not the same as one confirmed by someone who knows the codebase, the tech debt, and the team's actual capabilities.""",
+
+    "Viability Risk": """### Probe 5: Viability Risk
+
+**Purpose:** Does this make business sense? Can the organization afford to build, launch, and maintain it?
+
+**When it fires:** Always, but especially deep when the solution requires significant investment or organizational change.
+
+**What it checks:**
+- What's the total cost of ownership (build + maintain + support)?
+- Does this align with current organizational priorities and budget cycles?
+- Who needs to approve this, and what's their appetite for this type of investment?
+- Is there a sustainable model for maintaining this after launch? (Or does it become shelfware?)
+- Does this create dependencies on external vendors or partners?
+- **Cannibalization check:** Does this solution's success for one stakeholder create losses for another? Especially in multi-sided business models (e.g., optimizing CPG campaign spend could erode Kroger's private label margin; maximizing ad revenue could degrade shopper experience). This is distinct from anti-metrics — anti-metrics track what shouldn't get worse within the same stakeholder's domain; cannibalization tracks cross-stakeholder value transfer.
+
+**Key questions to explore:**
+- "Who approves the budget for this, and what's their decision timeline?"
+- "What happens to this product in 2 years? Who maintains it?"
+- "Does this compete with any other initiative for the same resources?"
+
+**Completion criteria:** Assessment of organizational alignment and sustainability, with specific approval gates identified.""",
+
+    "Build vs Buy": """### Probe 6: Build vs. Buy vs. Partner
+
+**Purpose:** Has the user considered that building from scratch may not be the right approach?
+
+**When it fires:** When the proposed solution is a custom build. Suppress if the user has already evaluated alternatives or if the solution is clearly unique to their context.
+
+**What it checks:**
+- Are there existing products or platforms that solve this or something close?
+- What's the total cost of building vs. licensing vs. partnering?
+- What's the maintenance burden of a custom build vs. a managed solution?
+- Is the differentiation in the solution itself, or in how it's applied? (If the latter, buy the platform and customize the application)
+
+**Key questions to explore:**
+- "Have you looked at what's available on the market for this?"
+- "What part of this solution is truly unique to your context vs. a general capability?"
+- "If a vendor could get you 70% of the way there, would that be worth exploring?"
+
+**Completion criteria:** Either a justified build decision (with reasoning for why buy/partner won't work) or a recommendation to evaluate alternatives.
+
+**Vendor knowledge guardrail:** Do not recommend specific vendors or products. The system's knowledge of the vendor landscape may be outdated. Instead, help the PM define evaluation criteria for vendor assessment and ask whether they've done a current market scan. The output of this probe should be a decision framework ("here's how to evaluate build vs. buy for this specific case"), not vendor recommendations.""",
+
+    "Validation Approach": """### Probe 7: Validation Approach
+
+**Purpose:** What's the fastest, cheapest way to test the riskiest assumptions before committing to a full build?
+
+**When it fires:** After the other probes have identified the key risks. This is typically the last probe.
+
+**What it checks:**
+- What's the single riskiest assumption? (From the assumption register)
+- What's the cheapest experiment that would validate or invalidate it?
+- What prototype fidelity is appropriate? Options:
+  - **Painted door test:** Fake the feature, measure demand (tests value risk)
+  - **Concierge MVP:** Do it manually for a few users, learn what actually matters (tests value + usability risk)
+  - **Technical spike:** Build the hardest part first, see if it works (tests feasibility risk)
+  - **Wizard of Oz:** User thinks it's automated, human does it behind the scenes (tests value + usability without feasibility investment)
+  - **Clickable prototype:** Non-functional mockup for user feedback (tests usability risk)
+
+**Key questions to explore:**
+- "What's the one thing that, if it turned out to be wrong, would kill this project?"
+- "Can we test that assumption in under 2 weeks with minimal investment?"
+- "What would 'good enough evidence' look like to proceed to full build?"
+
+**Completion criteria:** A specific validation recommendation with approach, timeline, and success criteria.""",
+}
+
+# Domain patterns — looked up by key when Phase A detects a triggered pattern.
+MODE2_PATTERNS = {
+    "Build It and They Will Come": """### Pattern 1: "Build It and They Will Come"
+**Trigger:** ALL: custom build proposed + no distribution/adoption plan + users not involved in design
+**Why it exists:** Technical teams often focus on building the capability and assume users will adopt it because the problem is real. But adoption requires change management, training, workflow integration, and often organizational incentives. Failure to plan for adoption is the #1 reason technically successful projects fail to deliver value.
+**What it does:** Registers a high-impact assumption: "target users will adopt this without a dedicated adoption plan." Asks about distribution strategy, change management, and user involvement in design.""",
+
+    "V1 Overengineering": """### Pattern 2: "V1 Overengineering"
+**Trigger:** ALL: first version + >6 month timeline + no prior validation
+**Why it exists:** Teams sometimes design V1 as a comprehensive platform when a narrower first version would validate the core hypothesis faster and cheaper. The risk is spending 12 months building something that misses the mark when a 6-week version would have revealed that.
+**What it does:** Asks: "What's the smallest version of this that would tell you if the approach works? Could you validate the core value proposition with a fraction of the planned scope?" """,
+
+    "Data Optimism": """### Pattern 3: "Data Optimism"
+**Trigger:** ANY: ML/AI-based solution, data pipeline dependency, "we have the data" without specifics
+**Why it exists:** Solutions involving data or ML almost always underestimate data preparation effort. "We have the data" usually means "the data exists somewhere" — not that it's accessible, clean, at the right granularity, or has sufficient history. This is the most common source of timeline overruns.
+**What it does:** Registers a feasibility assumption about data readiness. Asks: "Have you actually looked at this data? Is it at the granularity you need? How much cleaning/transformation is required? What's the historical depth?" """,
+
+    "Key Person Dependency": """### Pattern 4: "Key Person Dependency"
+**Trigger:** ALL: specialized technical approach + small team (<5) + timeline >6 months
+**Why it exists:** Complex technical solutions often depend on 1-2 people with specialized knowledge. If those people leave, get reassigned, or burn out, the project stalls. This risk increases with timeline length.
+**What it does:** Registers a feasibility risk about talent continuity. Asks about knowledge transfer plans, documentation practices, and whether the approach could be simplified to reduce single-point-of-failure risk.
+*Note: This overlaps with Mode 1's Pattern 5 (Talent Drain). If already fired in Mode 1, Mode 2 references the existing assumption rather than re-registering.*""",
+
+    "Integration Underestimation": """### Pattern 5: "Integration Underestimation"
+**Trigger:** ANY: connects to existing systems, replaces current tool, requires API/data integration
+**Why it exists:** New solutions rarely exist in isolation — they need to connect to existing tools, data sources, and workflows. Integration work is consistently underestimated because it involves negotiating with other teams, understanding undocumented dependencies, and working with systems you don't control.
+**What it does:** Asks: "What systems does this need to connect to? Who owns those systems? Have you discussed this integration with them? What's their roadmap and availability?" """,
+}
+
+# Backward-compatible export — joins everything into a single string.
+# Used by current orchestrator.py imports. Will be removed after orchestrator refactor.
+MODE2_KNOWLEDGE = (
+    MODE2_CORE_INSTRUCTIONS
+    + "\n\n" + MODE2_RISK_FRAMEWORK
+    + "\n\n" + "\n\n".join(MODE2_PROBES.values())
+    + "\n\n" + "\n\n".join(MODE2_PATTERNS.values())
+)

@@ -1,4 +1,13 @@
-MODE1_KNOWLEDGE = """
+# mode1_knowledge.py — Decomposed for RAG-based selective injection
+#
+# Three exports:
+#   MODE1_CORE_INSTRUCTIONS — always sent to Phase B (behavioral meta-rules)
+#   MODE1_PROBES            — dict keyed by probe name, looked up via Phase A routing
+#   MODE1_PATTERNS          — dict keyed by pattern name, looked up via Phase A routing
+#
+# Plus backward-compatible MODE1_KNOWLEDGE that joins everything (removed after orchestrator refactor).
+
+MODE1_CORE_INSTRUCTIONS = """
 # Mode 1: Discover & Frame — Full Specification (v2)
 
 ## Document Purpose
@@ -47,137 +56,6 @@ Mode 1 activates when:
 ## 3. Diagnostic Reasoning Model
 
 Seven diagnostic probes, applied in priority order. Not every probe fires for every input.
-
-### Probe 1: Solution-Problem Separation (ALWAYS RUNS FIRST)
-
-**Purpose:** Determine whether the user is presenting a problem or an embedded solution, and peel them apart.
-
-**Logic:**
-```
-IF input contains a specific solution or technical approach:
-    → Extract: What PROBLEM does this solution assume exists?
-    → Extract: What ASSUMPTIONS about the problem are baked in?
-    → Extract: What ALTERNATIVE framings might exist?
-    → Surface via density-to-risk (always probe if high-risk,
-      even if user is brief/action-oriented)
-
-IF input is a pure problem statement with no embedded solution:
-    → Validate: Is this a real problem or an assumed one?
-    → Probe for evidence of existence
-```
-
-**Example — Digital Twins Input:**
-```
-Input: "The UCM could benefit from a pre-activation decision
-capability that uses linked digital twins..."
-
-Embedded solution: Linked digital twins (campaign twin + customer twin)
-Embedded framing: Pre-campaign measurement
-Assumed problem: Can't estimate campaign performance before spending
-Unasked questions:
-  - What's the current estimation process?
-  - Is the gap accuracy, speed, granularity, or trust?
-  - Could simpler approaches solve the actual pain?
-```
-
-**Satisfied when:**
-- The assumed problem is stated separately from the proposed solution
-- At least one alternative framing has been surfaced
-- Key assumptions baked into the original framing are registered
-
-### Probe 2: "Why Now?" Trigger
-
-**Purpose:** Understand what's driving this problem to the surface right now.
-
-**Key questions to explore:**
-- New leader's priorities?
-- Recent failure making this visible?
-- Competitor doing something similar?
-- Conference or vendor pitch inspiration?
-- Budget cycle or planning deadline?
-- Known issue that's suddenly urgent? Why?
-
-**Why this matters:** If digital twins is being pursued because KPM leadership saw it at a conference, the real problem might be "leadership wants to demonstrate innovation" — different success criteria than "campaigns are underperforming."
-
-**Satisfied when:**
-- The driving trigger for "why now" is identified (or confirmed as absent)
-- The trigger's implications for success criteria are noted
-
-### Probe 3: Immediate vs. Platform Framing
-
-**Purpose:** Surface whether the problem should be framed as a narrow client need or a broad capability.
-
-**When to activate:** Whenever a problem could serve multiple stakeholders or use cases.
-
-| Framing | Scope | Success Metric | Investment | Risk |
-|---------|-------|----------------|------------|------|
-| **Immediate** | Specific client/team | Client satisfaction, specific KPI | Lower, faster | Too narrow to reuse |
-| **Platform** | Multiple use cases | Reusability, adoption, compounding value | Higher, slower | Over-engineered for immediate need |
-
-**Diplomatic surfacing:** Naturally flattering — "This could be bigger than just [immediate use case]." Forces conscious scope decision without challenging the idea.
-
-**Satisfied when:**
-- User has made a conscious scope choice (immediate vs platform) OR scope ambiguity is registered as an assumption
-
-### Probe 4: Store Reality Check (Domain-Specific)
-
-**Purpose:** Detect whether a solution requires store-level behavioral change that hasn't been accounted for.
-
-**See Section 8 (Pattern 1) for trigger and suppression conditions.**
-
-**Satisfied when:**
-- Store execution dependency is confirmed or ruled out
-- If confirmed: relevant stakeholders are registered
-
-### Probe 5: Status Quo Beneficiaries
-
-**Purpose:** Identify who benefits from the current state and where resistance will come from.
-
-**When to activate:** Especially when:
-- Problem has been known for a long time but hasn't been solved
-- Solution would change someone's decision-making process
-- Solution would make existing manual expertise less valuable
-
-**Key questions:**
-- Who currently makes the decisions this solution would automate/inform?
-- If someone's judgment is being replaced by data, how will they react?
-- Is there an existing tool or vendor this would replace? Who championed it?
-
-**Diplomatic framing:** Never "someone is going to block you." Instead: "Who currently owns this decision, and how do we make sure they see this as empowering rather than threatening?"
-
-**Satisfied when:**
-- Status quo beneficiaries are identified OR confirmed as non-existent
-- If identified: their likely response is assessed
-
-### Probe 6: Edge Mapping
-
-**Purpose:** Understand boundaries — what causes the problem, what it causes, what's adjacent.
-
-**Four edges:**
-- **Upstream (causes):** Data problem? Process? People? Tooling?
-- **Downstream (effects):** Bad allocation? Missed revenue? Team frustration? Client churn?
-- **Adjacent:** If pre-campaign measurement is broken, is post-campaign also broken? Is targeting the real issue?
-- **Temporal:** New or old? If old, why NOW? (Links to Probe 2)
-
-**Satisfied when:**
-- At least upstream and downstream edges are mapped
-- Adjacent problems are noted if relevant
-
-### Probe 7: Value Hypothesis (Lightweight)
-
-**Purpose:** Rough hypothesis about where value comes from. Gives Mode 4 a starting point.
-
-**Output format:**
-> "If this problem is real and solvable, value comes from [X], measured by [Y]. Magnitude depends on [key assumptions]."
-
-**Must include success metrics:**
-- Leading indicator (what changes first)
-- Lagging indicator (what ultimately proves value)
-- Anti-metric (what should NOT get worse)
-
-**Satisfied when:**
-- A rough value hypothesis exists with leading, lagging, and anti-metric
-- Key assumptions behind the value estimate are registered
 
 ---
 
@@ -402,191 +280,9 @@ For each:
 
 ---
 
-## 8. Domain-Specific Patterns with Trigger/Suppression Conditions
+## 8. Domain-Specific Patterns
 
 Every pattern has explicit conditions for when it fires and when it stays silent. This prevents "boy who cried wolf" warnings that users tune out.
-
-### Pattern 1: The Analytics-Execution Gap (Store Reality Check)
-
-**Description:** 84.51° builds analytically sophisticated solutions that assume store-level behavioral change. Store operations has constraints not in original framing, limiting value.
-
-**Trigger conditions (fire when ANY are true):**
-- Solution would change in-store customer experience
-- Solution would change store employee workflows or processes
-- Solution would change delivery schedules or logistics
-- Solution would change how products are displayed, priced, or promoted
-- Solution produces output that store teams need to act on
-- Solution assumes consistent store-level execution quality
-
-**Suppression conditions (stay silent when ALL are true):**
-- Solution is purely digital/online (no store execution component)
-- Solution only affects 84.51° or KPM internal processes
-- Solution is analytics/reporting only with no operational change required
-
-**When triggered, register:**
-```
-type: "stakeholder_dependency"
-claim: "Store-level execution can adapt to support this solution"
-impact: "high"
-confidence: "guessed"
-```
-
-**Timing:** Can trigger early — store execution dependency is often visible from the initial problem statement.
-
-### Pattern 2: The Dual-Customer Ambiguity
-
-**Description:** Problems get framed for an immediate client (CPG/KPM) but could be a platform capability serving Kroger broadly. Scope ambiguity leads to under-investment or over-engineering.
-
-**Trigger conditions (fire when ANY are true):**
-- Problem involves a capability that could serve both CPG clients and Kroger internal teams
-- Problem involves KPM services that have analogs in Kroger's internal marketing
-- Solution could become a foundational/reusable capability
-- User hasn't explicitly stated the scope (KPM-only vs. Kroger-wide)
-
-**Suppression conditions (stay silent when ALL are true):**
-- User has explicitly stated and justified the scope
-- Problem is purely internal to one team with no cross-functional applicability
-- Problem is operational/tactical with no platform implications
-
-**When triggered, register:**
-```
-type: "organizational"
-claim: "This is scoped to [stated scope] only"
-impact: "high"
-confidence: "guessed"
-```
-
-**Timing:** Can trigger early — scope ambiguity is often visible from the initial framing.
-
-### Pattern 3: Conference-Driven Solution Anchoring
-
-**Description:** Stakeholder saw a technology at a conference or vendor pitch and wants to apply it. Technology becomes the starting point instead of the problem.
-
-**Trigger conditions (fire when ALL are true):**
-- User proposes a specific, named technology or methodology (digital twins, GenAI, blockchain, etc.)
-- No evidence of prior problem validation in the input
-- The technology is trendy/buzzworthy in the current industry landscape
-
-**Suppression conditions (stay silent when ANY are true):**
-- User provides evidence that the underlying problem has been validated independently of the technology
-- User explicitly states they've evaluated alternatives
-- The technology is a well-established, non-buzzworthy tool for the stated problem
-
-**When triggered:** Activate Probe 1 (Solution-Problem Separation) and Probe 2 (Why Now?) with diplomatic framing.
-
-**Timing:** SHOULD trigger early — if present, it fundamentally changes the questioning direction. Do not wait for the final output.
-
-### Pattern 4: Monopoly Complacency Risk
-
-**Description:** 84.51°'s captive data monopoly means CPGs have no alternative for Kroger data access. Solutions may be evaluated against a low internal bar rather than competitive benchmarks.
-
-**Trigger conditions (fire when ALL are true):**
-- Success metric is defined as "better than current internal baseline"
-- No reference to external benchmarks (Amazon, Walmart, industry standards)
-- Solution serves external clients (CPGs) who could compare to competing platforms
-
-**Suppression conditions (stay silent when ANY are true):**
-- User has already defined competitive benchmarks
-- Solution is purely internal (no external client comparison)
-- User explicitly acknowledges the competitive landscape
-
-**When triggered:**
-- **Honest (to PM):** "Is the bar 'better than what we have' or 'competitive with what Amazon/Walmart offer'? CPGs are comparing KPM to those platforms. If we're only beating our own low bar, that's not a defensible position."
-- **Diplomatic (for stakeholder):** "How are our CPG partners currently evaluating campaign measurement across their retail media investments? What benchmarks would make this capability stand out?"
-
-**Timing:** Usually triggers mid-conversation — requires enough context to assess success metric framing.
-
-### Pattern 5: Talent/Resource Dependency Risk
-
-**Description:** 84.51° faces talent challenges (below-market comp, low morale, attrition). Solutions requiring specialized, long-term human investment face execution risk.
-
-**Trigger conditions (fire when ALL are true):**
-- Solution requires custom model development or maintenance by specialized roles
-- Project timeline exceeds 12 months with specialized skill dependencies
-- Solution creates single-points-of-failure around specific people or small teams
-
-**Suppression conditions (stay silent when ANY are true):**
-- Solution uses existing, maintained platforms/tools
-- Solution requires only short-term specialized work (< 6 months)
-- Solution has clear handoff path to less specialized maintenance
-- User has already addressed staffing/resourcing plan
-
-**When triggered, register:**
-```
-type: "organizational"
-claim: "Specialized talent will be available and retained for project duration"
-impact: "medium"
-confidence: "guessed"
-```
-
-**Timing:** Usually triggers mid-to-late — requires solution specificity to assess skill dependencies.
-
-### Pattern 6: Alternative Profit Framing Distortion
-
-**Description:** KPM/alternative profit is ~30% of Kroger's operating profit. Problems tend to get framed in revenue terms even when the real need is operational or customer-experience driven.
-
-**Trigger conditions (fire when ALL are true):**
-- Problem is framed primarily in terms of revenue growth or alternative profit
-- No mention of operational efficiency or customer experience dimensions
-- The underlying problem COULD be framed as an operational or CX improvement
-
-**Suppression conditions (stay silent when ANY are true):**
-- Problem genuinely IS about revenue/monetization
-- User has already considered non-revenue dimensions
-- Problem has no plausible operational or CX framing
-
-**When triggered:**
-- **Honest (to PM):** "This is being framed as a revenue play, but is the real problem about campaign effectiveness for the end customer? If you only measure revenue impact, you might build something that maximizes KPM billing but doesn't actually improve campaign outcomes."
-- **Diplomatic (for stakeholder):** "Beyond the revenue impact, how would this change the experience for the end shopper? Understanding both dimensions helps build a stronger investment case."
-
-**Timing:** Can trigger early — revenue-only framing is often visible from the initial problem statement.
-
-### Pattern 7: Data Privacy as Hidden Constraint
-
-**Description:** Household-level data usage faces increasing scrutiny. Legal review can significantly delay or constrain solutions.
-
-**Trigger conditions (fire when ANY are true):**
-- Solution involves household-level or individual-level targeting/profiling
-- Solution involves sharing behavioral data with external partners
-- Solution creates new data linkages between previously separate datasets
-- Solution involves personalization that could be perceived as surveillance
-
-**Suppression conditions (stay silent when ALL are true):**
-- Solution uses only aggregated/anonymized data
-- Solution operates within existing, already-approved data usage patterns
-- User has confirmed legal/privacy review is already underway
-
-**When triggered, register:**
-```
-type: "stakeholder_dependency"
-claim: "Solution can use household-level data without additional privacy/legal review"
-implied_stakeholders: ["legal", "privacy_team"]
-impact: "medium"
-confidence: "guessed"
-```
-
-**Timing:** Usually triggers mid-conversation — requires enough solution detail to assess data usage patterns.
-
-### Pattern 8: Post-Ocado Capital Aversion
-
-**Description:** Kroger wrote down $2.6B on Ocado automated fulfillment. Large capital-intensive infrastructure bets face a higher bar.
-
-**Trigger conditions (fire when ALL are true):**
-- Solution requires significant new infrastructure investment
-- Solution is capital-intensive (not just OpEx/headcount)
-- Solution involves automation or new technology platforms at scale
-
-**Suppression conditions (stay silent when ANY are true):**
-- Solution leverages existing infrastructure
-- Investment is primarily OpEx (people, software licenses)
-- Solution is a small pilot/POC, not a scaled infrastructure bet
-- User has already secured capital commitment
-
-**When triggered:**
-- **Honest (to PM):** "After the $2.6B Ocado write-down, any capital-intensive infrastructure proposal faces extreme scrutiny. Frame this as a pilot with clear stage-gates, not a big bet."
-- **Diplomatic (for stakeholder):** "Given current investment priorities, how would you envision the rollout path? A phased approach with clear validation checkpoints at each stage?"
-
-**Timing:** Usually triggers late — requires understanding of solution's investment profile.
 
 ---
 
@@ -685,3 +381,332 @@ register_assumption(
 *Depends on: Orchestrator Specification v2*
 *Next: Mode 2 (Evaluate Solution)*
 """
+
+# Probe definitions — looked up by key based on Phase A's next_probe output.
+# Keys are "Probe 1" through "Probe 7" (short, unambiguous).
+MODE1_PROBES = {
+    "Probe 1": """### Probe 1: Solution-Problem Separation (ALWAYS RUNS FIRST)
+
+**Purpose:** Determine whether the user is presenting a problem or an embedded solution, and peel them apart.
+
+**Logic:**
+```
+IF input contains a specific solution or technical approach:
+    → Extract: What PROBLEM does this solution assume exists?
+    → Extract: What ASSUMPTIONS about the problem are baked in?
+    → Extract: What ALTERNATIVE framings might exist?
+    → Surface via density-to-risk (always probe if high-risk,
+      even if user is brief/action-oriented)
+
+IF input is a pure problem statement with no embedded solution:
+    → Validate: Is this a real problem or an assumed one?
+    → Probe for evidence of existence
+```
+
+**Example — Digital Twins Input:**
+```
+Input: "The UCM could benefit from a pre-activation decision
+capability that uses linked digital twins..."
+
+Embedded solution: Linked digital twins (campaign twin + customer twin)
+Embedded framing: Pre-campaign measurement
+Assumed problem: Can't estimate campaign performance before spending
+Unasked questions:
+  - What's the current estimation process?
+  - Is the gap accuracy, speed, granularity, or trust?
+  - Could simpler approaches solve the actual pain?
+```
+
+**Satisfied when:**
+- The assumed problem is stated separately from the proposed solution
+- At least one alternative framing has been surfaced
+- Key assumptions baked into the original framing are registered""",
+
+    "Probe 2": """### Probe 2: "Why Now?" Trigger
+
+**Purpose:** Understand what's driving this problem to the surface right now.
+
+**Key questions to explore:**
+- New leader's priorities?
+- Recent failure making this visible?
+- Competitor doing something similar?
+- Conference or vendor pitch inspiration?
+- Budget cycle or planning deadline?
+- Known issue that's suddenly urgent? Why?
+
+**Why this matters:** If digital twins is being pursued because KPM leadership saw it at a conference, the real problem might be "leadership wants to demonstrate innovation" — different success criteria than "campaigns are underperforming."
+
+**Satisfied when:**
+- The driving trigger for "why now" is identified (or confirmed as absent)
+- The trigger's implications for success criteria are noted""",
+
+    "Probe 3": """### Probe 3: Immediate vs. Platform Framing
+
+**Purpose:** Surface whether the problem should be framed as a narrow client need or a broad capability.
+
+**When to activate:** Whenever a problem could serve multiple stakeholders or use cases.
+
+| Framing | Scope | Success Metric | Investment | Risk |
+|---------|-------|----------------|------------|------|
+| **Immediate** | Specific client/team | Client satisfaction, specific KPI | Lower, faster | Too narrow to reuse |
+| **Platform** | Multiple use cases | Reusability, adoption, compounding value | Higher, slower | Over-engineered for immediate need |
+
+**Diplomatic surfacing:** Naturally flattering — "This could be bigger than just [immediate use case]." Forces conscious scope decision without challenging the idea.
+
+**Satisfied when:**
+- User has made a conscious scope choice (immediate vs platform) OR scope ambiguity is registered as an assumption""",
+
+    "Probe 4": """### Probe 4: Store Reality Check (Domain-Specific)
+
+**Purpose:** Detect whether a solution requires store-level behavioral change that hasn't been accounted for.
+
+**See Section 8 (Pattern 1) for trigger and suppression conditions.**
+
+**Satisfied when:**
+- Store execution dependency is confirmed or ruled out
+- If confirmed: relevant stakeholders are registered""",
+
+    "Probe 5": """### Probe 5: Status Quo Beneficiaries
+
+**Purpose:** Identify who benefits from the current state and where resistance will come from.
+
+**When to activate:** Especially when:
+- Problem has been known for a long time but hasn't been solved
+- Solution would change someone's decision-making process
+- Solution would make existing manual expertise less valuable
+
+**Key questions:**
+- Who currently makes the decisions this solution would automate/inform?
+- If someone's judgment is being replaced by data, how will they react?
+- Is there an existing tool or vendor this would replace? Who championed it?
+
+**Diplomatic framing:** Never "someone is going to block you." Instead: "Who currently owns this decision, and how do we make sure they see this as empowering rather than threatening?"
+
+**Satisfied when:**
+- Status quo beneficiaries are identified OR confirmed as non-existent
+- If identified: their likely response is assessed""",
+
+    "Probe 6": """### Probe 6: Edge Mapping
+
+**Purpose:** Understand boundaries — what causes the problem, what it causes, what's adjacent.
+
+**Four edges:**
+- **Upstream (causes):** Data problem? Process? People? Tooling?
+- **Downstream (effects):** Bad allocation? Missed revenue? Team frustration? Client churn?
+- **Adjacent:** If pre-campaign measurement is broken, is post-campaign also broken? Is targeting the real issue?
+- **Temporal:** New or old? If old, why NOW? (Links to Probe 2)
+
+**Satisfied when:**
+- At least upstream and downstream edges are mapped
+- Adjacent problems are noted if relevant""",
+
+    "Probe 7": """### Probe 7: Value Hypothesis (Lightweight)
+
+**Purpose:** Rough hypothesis about where value comes from. Gives Mode 4 a starting point.
+
+**Output format:**
+> "If this problem is real and solvable, value comes from [X], measured by [Y]. Magnitude depends on [key assumptions]."
+
+**Must include success metrics:**
+- Leading indicator (what changes first)
+- Lagging indicator (what ultimately proves value)
+- Anti-metric (what should NOT get worse)
+
+**Satisfied when:**
+- A rough value hypothesis exists with leading, lagging, and anti-metric
+- Key assumptions behind the value estimate are registered""",
+}
+
+# Domain patterns — looked up by key when Phase A detects a triggered pattern.
+# Keys are the pattern's descriptive name (not "Pattern 1" — Phase A outputs these names).
+MODE1_PATTERNS = {
+    "Analytics-Execution Gap": """### Pattern 1: The Analytics-Execution Gap (Store Reality Check)
+
+**Description:** 84.51° builds analytically sophisticated solutions that assume store-level behavioral change. Store operations has constraints not in original framing, limiting value.
+
+**Trigger conditions (fire when ANY are true):**
+- Solution would change in-store customer experience
+- Solution would change store employee workflows or processes
+- Solution would change delivery schedules or logistics
+- Solution would change how products are displayed, priced, or promoted
+- Solution produces output that store teams need to act on
+- Solution assumes consistent store-level execution quality
+
+**Suppression conditions (stay silent when ALL are true):**
+- Solution is purely digital/online (no store execution component)
+- Solution only affects 84.51° or KPM internal processes
+- Solution is analytics/reporting only with no operational change required
+
+**When triggered, register:**
+```
+type: "stakeholder_dependency"
+claim: "Store-level execution can adapt to support this solution"
+impact: "high"
+confidence: "guessed"
+```
+
+**Timing:** Can trigger early — store execution dependency is often visible from the initial problem statement.""",
+
+    "Dual-Customer Ambiguity": """### Pattern 2: The Dual-Customer Ambiguity
+
+**Description:** Problems get framed for an immediate client (CPG/KPM) but could be a platform capability serving Kroger broadly. Scope ambiguity leads to under-investment or over-engineering.
+
+**Trigger conditions (fire when ANY are true):**
+- Problem involves a capability that could serve both CPG clients and Kroger internal teams
+- Problem involves KPM services that have analogs in Kroger's internal marketing
+- Solution could become a foundational/reusable capability
+- User hasn't explicitly stated the scope (KPM-only vs. Kroger-wide)
+
+**Suppression conditions (stay silent when ALL are true):**
+- User has explicitly stated and justified the scope
+- Problem is purely internal to one team with no cross-functional applicability
+- Problem is operational/tactical with no platform implications
+
+**When triggered, register:**
+```
+type: "organizational"
+claim: "This is scoped to [stated scope] only"
+impact: "high"
+confidence: "guessed"
+```
+
+**Timing:** Can trigger early — scope ambiguity is often visible from the initial framing.""",
+
+    "Conference-Driven Solution Anchoring": """### Pattern 3: Conference-Driven Solution Anchoring
+
+**Description:** Stakeholder saw a technology at a conference or vendor pitch and wants to apply it. Technology becomes the starting point instead of the problem.
+
+**Trigger conditions (fire when ALL are true):**
+- User proposes a specific, named technology or methodology (digital twins, GenAI, blockchain, etc.)
+- No evidence of prior problem validation in the input
+- The technology is trendy/buzzworthy in the current industry landscape
+
+**Suppression conditions (stay silent when ANY are true):**
+- User provides evidence that the underlying problem has been validated independently of the technology
+- User explicitly states they've evaluated alternatives
+- The technology is a well-established, non-buzzworthy tool for the stated problem
+
+**When triggered:** Activate Probe 1 (Solution-Problem Separation) and Probe 2 (Why Now?) with diplomatic framing.
+
+**Timing:** SHOULD trigger early — if present, it fundamentally changes the questioning direction. Do not wait for the final output.""",
+
+    "Monopoly Complacency Risk": """### Pattern 4: Monopoly Complacency Risk
+
+**Description:** 84.51°'s captive data monopoly means CPGs have no alternative for Kroger data access. Solutions may be evaluated against a low internal bar rather than competitive benchmarks.
+
+**Trigger conditions (fire when ALL are true):**
+- Success metric is defined as "better than current internal baseline"
+- No reference to external benchmarks (Amazon, Walmart, industry standards)
+- Solution serves external clients (CPGs) who could compare to competing platforms
+
+**Suppression conditions (stay silent when ANY are true):**
+- User has already defined competitive benchmarks
+- Solution is purely internal (no external client comparison)
+- User explicitly acknowledges the competitive landscape
+
+**When triggered:**
+- **Honest (to PM):** "Is the bar 'better than what we have' or 'competitive with what Amazon/Walmart offer'? CPGs are comparing KPM to those platforms. If we're only beating our own low bar, that's not a defensible position."
+- **Diplomatic (for stakeholder):** "How are our CPG partners currently evaluating campaign measurement across their retail media investments? What benchmarks would make this capability stand out?"
+
+**Timing:** Usually triggers mid-conversation — requires enough context to assess success metric framing.""",
+
+    "Talent/Resource Dependency Risk": """### Pattern 5: Talent/Resource Dependency Risk
+
+**Description:** 84.51° faces talent challenges (below-market comp, low morale, attrition). Solutions requiring specialized, long-term human investment face execution risk.
+
+**Trigger conditions (fire when ALL are true):**
+- Solution requires custom model development or maintenance by specialized roles
+- Project timeline exceeds 12 months with specialized skill dependencies
+- Solution creates single-points-of-failure around specific people or small teams
+
+**Suppression conditions (stay silent when ANY are true):**
+- Solution uses existing, maintained platforms/tools
+- Solution requires only short-term specialized work (< 6 months)
+- Solution has clear handoff path to less specialized maintenance
+- User has already addressed staffing/resourcing plan
+
+**When triggered, register:**
+```
+type: "organizational"
+claim: "Specialized talent will be available and retained for project duration"
+impact: "medium"
+confidence: "guessed"
+```
+
+**Timing:** Usually triggers mid-to-late — requires solution specificity to assess skill dependencies.""",
+
+    "Alternative Profit Framing Distortion": """### Pattern 6: Alternative Profit Framing Distortion
+
+**Description:** KPM/alternative profit is ~30% of Kroger's operating profit. Problems tend to get framed in revenue terms even when the real need is operational or customer-experience driven.
+
+**Trigger conditions (fire when ALL are true):**
+- Problem is framed primarily in terms of revenue growth or alternative profit
+- No mention of operational efficiency or customer experience dimensions
+- The underlying problem COULD be framed as an operational or CX improvement
+
+**Suppression conditions (stay silent when ANY are true):**
+- Problem genuinely IS about revenue/monetization
+- User has already considered non-revenue dimensions
+- Problem has no plausible operational or CX framing
+
+**When triggered:**
+- **Honest (to PM):** "This is being framed as a revenue play, but is the real problem about campaign effectiveness for the end customer? If you only measure revenue impact, you might build something that maximizes KPM billing but doesn't actually improve campaign outcomes."
+- **Diplomatic (for stakeholder):** "Beyond the revenue impact, how would this change the experience for the end shopper? Understanding both dimensions helps build a stronger investment case."
+
+**Timing:** Can trigger early — revenue-only framing is often visible from the initial problem statement.""",
+
+    "Data Privacy as Hidden Constraint": """### Pattern 7: Data Privacy as Hidden Constraint
+
+**Description:** Household-level data usage faces increasing scrutiny. Legal review can significantly delay or constrain solutions.
+
+**Trigger conditions (fire when ANY are true):**
+- Solution involves household-level or individual-level targeting/profiling
+- Solution involves sharing behavioral data with external partners
+- Solution creates new data linkages between previously separate datasets
+- Solution involves personalization that could be perceived as surveillance
+
+**Suppression conditions (stay silent when ALL are true):**
+- Solution uses only aggregated/anonymized data
+- Solution operates within existing, already-approved data usage patterns
+- User has confirmed legal/privacy review is already underway
+
+**When triggered, register:**
+```
+type: "stakeholder_dependency"
+claim: "Solution can use household-level data without additional privacy/legal review"
+implied_stakeholders: ["legal", "privacy_team"]
+impact: "medium"
+confidence: "guessed"
+```
+
+**Timing:** Usually triggers mid-conversation — requires enough solution detail to assess data usage patterns.""",
+
+    "Post-Ocado Capital Aversion": """### Pattern 8: Post-Ocado Capital Aversion
+
+**Description:** Kroger wrote down $2.6B on Ocado automated fulfillment. Large capital-intensive infrastructure bets face a higher bar.
+
+**Trigger conditions (fire when ALL are true):**
+- Solution requires significant new infrastructure investment
+- Solution is capital-intensive (not just OpEx/headcount)
+- Solution involves automation or new technology platforms at scale
+
+**Suppression conditions (stay silent when ANY are true):**
+- Solution leverages existing infrastructure
+- Investment is primarily OpEx (people, software licenses)
+- Solution is a small pilot/POC, not a scaled infrastructure bet
+- User has already secured capital commitment
+
+**When triggered:**
+- **Honest (to PM):** "After the $2.6B Ocado write-down, any capital-intensive infrastructure proposal faces extreme scrutiny. Frame this as a pilot with clear stage-gates, not a big bet."
+- **Diplomatic (for stakeholder):** "Given current investment priorities, how would you envision the rollout path? A phased approach with clear validation checkpoints at each stage?"
+
+**Timing:** Usually triggers late — requires understanding of solution's investment profile.""",
+}
+
+# Backward-compatible export — joins everything into a single string.
+# Used by current orchestrator.py imports. Will be removed after orchestrator refactor.
+MODE1_KNOWLEDGE = (
+    MODE1_CORE_INSTRUCTIONS
+    + "\n\n" + "\n\n".join(MODE1_PROBES.values())
+    + "\n\n" + "\n\n".join(MODE1_PATTERNS.values())
+)
