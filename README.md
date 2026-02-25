@@ -167,22 +167,31 @@ project-forge/
 │   ├── logging_config.py      # Rotating file + console logging setup
 │   ├── sidebar_docs.py        # Quick Start and How It Works content
 │   └── config.py              # Model names, embedding settings, token limits
+├── tests/
+│   ├── conftest.py            # Top-level test fixtures
+│   ├── fixtures/              # Test fixture data
+│   └── unit/
+│       ├── conftest.py        # Unit test fixtures
+│       ├── test_orchestrator.py
+│       ├── test_tools.py
+│       ├── test_rag.py
+│       └── test_chunking.py
 ├── docs/
 │   ├── specs/                 # Behavioral specifications
 │   │   ├── orchestrator-spec.md
 │   │   ├── mode1-spec.md
 │   │   ├── mode2-spec.md
 │   │   ├── implementation-spec.md
+│   │   ├── persistence-spec.md
+│   │   ├── sidebar-docs-spec.md
 │   │   ├── rag-architecture-summary.md
 │   │   └── rag-implementation-spec.md
-│   └── build/                 # Build instructions and playbooks
-│       ├── mode1-instructions.md
-│       ├── mode1-prompts.md
-│       ├── mode2-instructions.md
-│       ├── mode2-prompts.md
-│       ├── ui-improvements.md
-│       └── claude-code-playbook.md
+│   └── build/                 # Build instructions
+│       └── mode1-instructions.md
 ├── pyproject.toml
+├── requirements.txt
+├── .python-version            # Python 3.13
+├── uv.lock
 └── .env.example               # Required environment variables
 ```
 
@@ -220,7 +229,7 @@ uv venv
 source .venv/bin/activate
 
 # Install dependencies
-uv pip install -r requirements.txt
+uv pip install -e .
 
 # Set up your API key
 cp .env.example .env
@@ -239,6 +248,21 @@ streamlit run src/pm_copilot/app.py
 ```
 
 The app opens in your browser. Type a product problem or idea to start a conversation.
+
+### Testing
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run unit tests only (no external services required)
+pytest tests/ -m unit
+
+# Run with coverage report
+pytest --cov=src/pm_copilot tests/
+```
+
+Test markers: `unit` (no external services), `e2e` (requires API keys), `slow` (>5 seconds).
 
 ---
 

@@ -18,6 +18,7 @@ This is the single source of truth for what's been built, what's next, and where
 | Mode 4-5 | 🔲 Not started | — | — |
 | Enterprise integrations (Confluence, SharePoint) | 🔲 Not started | — | — |
 | Multi-user auth / persistence | 🔲 Not started | — | — |
+| pytest test suite (166 tests, 83% coverage) | ✅ Built | v0.3.0 | Feb 2026 |
 
 ---
 
@@ -37,16 +38,16 @@ These are the documents you need to build and maintain the system. No explainers
 | implementation-spec.md | `docs/specs/implementation-spec.md` | The BIG build spec for Orchestrator + Mode 1. File structure, data models, tool definitions with exact code, prompt templates, Streamlit UI, session management. This is what Claude Code builds from. v2.1. |
 | rag-architecture-summary.md | `docs/specs/rag-architecture-summary.md` | RAG architecture: vector DB, embedding model, chunking strategy, two-phase retrieval, SRE hardening. v2.1. |
 | rag-implementation-spec.md | `docs/specs/rag-implementation-spec.md` | RAG build spec: every function, data structure, integration point. Cached client pattern, tenacity retry, retrieval bypass, graceful DOCX handling. |
+| persistence-spec.md | `docs/specs/persistence-spec.md` | Project persistence: save/load state, project_state.json, context.md sync. |
+| sidebar-docs-spec.md | `docs/specs/sidebar-docs-spec.md` | Sidebar documentation: Quick Start and How It Works content. |
 
 #### Build Guides (the HOW)
 
 | File | Repo Path | Description |
 |------|-----------|-------------|
 | mode1-instructions.md | `docs/build/mode1-instructions.md` | Claude Code operating instructions for Orchestrator + Mode 1 build. Critical implementation notes, architecture principles, build order, testing checklist. |
-| mode1-prompts.md | `docs/build/mode1-prompts.md` | Step-by-step prompts to feed Claude Code for Mode 1 build. 7 prompts (Prompt 0-6). |
-| mode2-instructions.md | `docs/build/mode2-instructions.md` | Claude Code operating instructions for Mode 2 build. File-by-file changes, exact code, 4 semantic tools, artifact renderer, testing scenarios. |
-| mode2-prompts.md | `docs/build/mode2-prompts.md` | Step-by-step prompts to feed Claude Code for Mode 2 build. 6 prompts (Prompt 0-5). |
-| ui-improvements.md | `docs/build/ui-improvements.md` | Post-Mode-2 UI improvements: assumption register download, improved display, input sandboxing. |
+
+> **Note:** The following build guides were used during design/build sessions but were not committed to the repo: `mode1-prompts.md`, `mode2-instructions.md`, `mode2-prompts.md`, `ui-improvements.md`. The specs above contain the canonical design information.
 
 #### Tracking
 
@@ -67,10 +68,6 @@ Use this table to copy files from the delivery outputs into your repo with clean
 | `mode2-evaluate-solution-spec.md` | `docs/specs/mode2-spec.md` |
 | `claude-code-implementation-spec-updated.md` | `docs/specs/implementation-spec.md` |
 | `claude-code-instructions.md` | `docs/build/mode1-instructions.md` |
-| `claude-code-prompts.md` | `docs/build/mode1-prompts.md` |
-| `mode2-claude-code-instructions.md` | `docs/build/mode2-instructions.md` |
-| `mode2-claude-code-prompts.md` | `docs/build/mode2-prompts.md` |
-| `ui-improvements.md` | `docs/build/ui-improvements.md` |
 | `BUILD-STATUS.md` | `docs/BUILD-STATUS.md` |
 
 ---
@@ -94,20 +91,29 @@ These files were created during design sessions but are NOT build documents. The
 project-forge/
 ├── src/
 │   └── pm_copilot/
-│       ├── app.py                  ← + sidebar file upload, @st.cache_resource singletons
-│       ├── config.py               ← + RAG/embedding settings, VOYAGE_API_KEY
-│       ├── orchestrator.py         ← + RAG init, context assembly, turn indexing
-│       ├── org_context.py
-│       ├── prompts.py              ← + requires_retrieval, assembled context sections
-│       ├── state.py                ← + rag, project_state fields
-│       ├── tools.py                ← + org_context sync to project_state
-│       ├── persistence.py          ← + save/load_project_state
-│       ├── mode1_knowledge.py      ← decomposed: CORE_INSTRUCTIONS + PROBES dict + PATTERNS dict
-│       ├── mode2_knowledge.py      ← decomposed: CORE_INSTRUCTIONS + PROBES dict + PATTERNS dict
-│       ├── rag.py                  ← NEW: ForgeRAG, ChromaDB storage, Voyage embeddings, context assembly
-│       ├── chunking.py             ← NEW: DOCX/MD conversion, hierarchical chunking, parent-child pairs
-│       ├── logging_config.py
-│       └── sidebar_docs.py
+│       ├── app.py                  # Streamlit UI, sidebar, file upload, downloads
+│       ├── config.py               # Model names, RAG/embedding settings
+│       ├── orchestrator.py         # Two-phase engine + RAG context assembly
+│       ├── org_context.py          # Dynamic org context formatter
+│       ├── prompts.py              # All LLM prompts (system, Phase A, Phase B)
+│       ├── state.py                # Session state initialization
+│       ├── tools.py                # 18 tool definitions + handlers
+│       ├── persistence.py          # Project save/load, project_state.json, context.md sync
+│       ├── mode1_knowledge.py      # Mode 1: CORE_INSTRUCTIONS + PROBES dict + PATTERNS dict
+│       ├── mode2_knowledge.py      # Mode 2: CORE_INSTRUCTIONS + PROBES dict + PATTERNS dict
+│       ├── rag.py                  # ForgeRAG: ChromaDB storage, Voyage embeddings
+│       ├── chunking.py             # DOCX/MD → Markdown conversion, hierarchical chunking
+│       ├── logging_config.py       # Rotating file + console logging setup
+│       └── sidebar_docs.py         # Quick Start and How It Works content
+├── tests/
+│   ├── conftest.py                 # Top-level test fixtures
+│   ├── fixtures/                   # Test fixture data
+│   └── unit/
+│       ├── conftest.py             # Unit test fixtures
+│       ├── test_orchestrator.py
+│       ├── test_tools.py
+│       ├── test_rag.py
+│       └── test_chunking.py
 ├── docs/
 │   ├── BUILD-STATUS.md             ← THIS FILE
 │   ├── specs/
@@ -115,17 +121,17 @@ project-forge/
 │   │   ├── mode1-spec.md
 │   │   ├── mode2-spec.md
 │   │   ├── implementation-spec.md
-│   │   ├── rag-architecture-summary.md   ← NEW
-│   │   └── rag-implementation-spec.md    ← NEW
+│   │   ├── persistence-spec.md
+│   │   ├── sidebar-docs-spec.md
+│   │   ├── rag-architecture-summary.md
+│   │   └── rag-implementation-spec.md
 │   └── build/
-│       ├── mode1-instructions.md
-│       ├── mode1-prompts.md
-│       ├── mode2-instructions.md
-│       ├── mode2-prompts.md
-│       └── ui-improvements.md
-├── .env
+│       └── mode1-instructions.md
+├── .env.example
 ├── pyproject.toml
-└── CLAUDE.md
+├── requirements.txt
+├── .python-version
+└── uv.lock
 ```
 
 ---
@@ -133,15 +139,13 @@ project-forge/
 ## Build Sequence
 
 ### Phase 1: Orchestrator + Mode 1 ✅ COMPLETE
-**Docs used:** `implementation-spec.md` + `mode1-instructions.md` + `mode1-prompts.md`
+**Docs used:** `implementation-spec.md` + `mode1-instructions.md`
 **Specs referenced:** `orchestrator-spec.md` + `mode1-spec.md`
 
 ### Phase 2: Mode 2 ✅ COMPLETE
-**Docs used:** `mode2-instructions.md` + `mode2-prompts.md`
 **Specs referenced:** `mode2-spec.md`
 
 ### Phase 3: UI Improvements ✅ COMPLETE
-**Docs used:** `ui-improvements.md`
 
 ### Phase 4: RAG ✅ COMPLETE (v0.3.0)
 **Docs used:** `rag-implementation-spec.md`
@@ -169,3 +173,4 @@ project-forge/
 | Feb 15, 2025 | UI improvements spec created |
 | Feb 15, 2025 | BUILD-STATUS.md created — master tracking document |
 | Feb 24, 2026 | RAG build complete (v0.3.0): document upload, vector retrieval, context assembly, knowledge base decomposition |
+| Feb 25, 2026 | Documentation update: fixed README project structure, added testing section, synced BUILD-STATUS with actual repo contents |
