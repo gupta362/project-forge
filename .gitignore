@@ -15,5 +15,6 @@ wheels/
 # OS files
 .DS_Store
 
-# Local test scenarios
-tests/
+# Legacy E2E test scenarios (pre-pytest)
+tests/legacy/
+tests/fixtures/*.docx

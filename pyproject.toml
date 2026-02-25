@@ -17,5 +17,32 @@ dependencies = [
     "tenacity>=8.0",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-cov>=5.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests (no external services)",
+    "e2e: End-to-end tests (requires API keys)",
+    "slow: Tests that take > 5 seconds",
+]
+addopts = ["-ra", "--strict-markers", "--tb=short", "-q"]
+filterwarnings = ["ignore::DeprecationWarning:streamlit.*"]
+
+[tool.coverage.run]
+source = ["src/pm_copilot"]
+omit = [
+    "src/pm_copilot/app.py",
+    "src/pm_copilot/sidebar_docs.py",
+    "src/pm_copilot/mode1_knowledge.py",
+    "src/pm_copilot/mode2_knowledge.py",
+]
+
+[tool.coverage.report]
+fail_under = 60
+show_missing = true
+exclude_lines = ["pragma: no cover", "if __name__ == .__main__.", "logger\\."]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/pm_copilot"]
