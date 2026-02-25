@@ -359,6 +359,13 @@ class ForgeRAG:
             MODE1_PROBES.get(probe_name, "")
             or MODE2_PROBES.get(probe_name, "")
         )
+        if probe_name and not probe_content:
+            logger.warning(
+                "Probe lookup miss: '%s' not in MODE1_PROBES %s or MODE2_PROBES %s",
+                probe_name,
+                list(MODE1_PROBES.keys()),
+                list(MODE2_PROBES.keys()),
+            )
 
         triggered = phase_a_decision.get("triggered_patterns", [])
         pattern_parts = []
@@ -366,6 +373,11 @@ class ForgeRAG:
             content = MODE1_PATTERNS.get(p, "") or MODE2_PATTERNS.get(p, "")
             if content:
                 pattern_parts.append(content)
+            else:
+                logger.warning(
+                    "Pattern lookup miss: '%s' not in MODE1_PATTERNS or MODE2_PATTERNS",
+                    p,
+                )
         pattern_content = "\n\n".join(pattern_parts)
 
         return probe_content, pattern_content

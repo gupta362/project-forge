@@ -91,6 +91,16 @@ Current org context domain: {org_context_domain}
    - If the problem has moved to a materially different domain or functional area AND enrichment_count < 3: set enrichment_needed = true
    - "Materially different" means: different business function (marketing → logistics), different stakeholder ecosystem, or different competitive context. NOT just new details within the same domain.
 
+## Retrieval Decision
+Also output a boolean "requires_retrieval":
+- Set to **false** if the user is simply acknowledging, confirming, or asking to continue (e.g., "yes", "sounds good", "next question", "continue", "that makes sense", "go ahead").
+- Set to **true** if the user is providing new information, asking a question, sharing context, or giving a substantive response that would benefit from retrieving relevant documents or past conversation turns.
+
+## Probe Names
+When suggesting probes, use EXACT key names:
+- Mode 1 probes: "Probe 1", "Probe 2", "Probe 3", "Probe 4", "Probe 5", "Probe 6", "Probe 7"
+- Mode 2 probes: "Solution-Problem Fit", "Value Risk", "Usability Risk", "Feasibility Risk", "Viability Risk", "Build vs Buy", "Validation Approach"
+
 ## Respond with this JSON structure:
 {{
     "next_action": "ask_questions" | "micro_synthesize" | "enter_mode" | "continue_mode" | "flag_conflict" | "complete_mode",
@@ -99,9 +109,12 @@ Current org context domain: {org_context_domain}
     "conflict_flags": [],
     "high_risk_unprobed": ["list of assumption IDs or descriptions that are high-impact + guessed and haven't been addressed"],
     "suggested_probes": ["Probe 1", "Probe 3"],
+    "next_probe": "Probe 1",
+    "triggered_patterns": [],
     "micro_synthesis_due": true | false,
     "enrichment_needed": false,
-    "enrichment_query": "targeted description of what domain to enrich if enrichment_needed is true"
+    "enrichment_query": "targeted description of what domain to enrich if enrichment_needed is true",
+    "requires_retrieval": true | false
 }}
 """
 

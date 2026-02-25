@@ -12,16 +12,30 @@ from .prompts import (
     PHASE_B_MODE1_PROMPT,
     PHASE_B_MODE2_PROMPT,
 )
-from .mode1_knowledge import MODE1_KNOWLEDGE
-from .mode2_knowledge import MODE2_KNOWLEDGE
+from .mode1_knowledge import MODE1_KNOWLEDGE, MODE1_CORE_INSTRUCTIONS
+from .mode2_knowledge import MODE2_KNOWLEDGE, MODE2_CORE_INSTRUCTIONS
 from .org_context import format_org_context
+from . import config
 from .config import MODEL_NAME
+from .rag import ForgeRAG, _create_chroma_client, _create_voyage_client
 from .persistence import save_project, _load_context_file
 from .logging_config import setup_logging
 logger = setup_logging()
 
 
 client = Anthropic()
+
+
+@st.cache_resource
+def _get_chroma_client(vectordb_path: str):
+    """Cached ChromaDB client singleton — avoids SQLite thread-lock errors."""
+    return _create_chroma_client(vectordb_path)
+
+
+@st.cache_resource
+def _get_voyage_client(api_key: str):
+    """Cached Voyage AI client singleton."""
+    return _create_voyage_client(api_key)
 
 
 def run_turn(user_message: str) -> str:
@@ -59,17 +73,48 @@ def run_turn(user_message: str) -> str:
     if hasattr(st.session_state, 'project_dir') and st.session_state.project_dir:
         _load_context_file(st.session_state.project_dir)
 
+    # Initialize RAG if needed (uses @st.cache_resource singletons from app.py)
+    if st.session_state.project_dir and st.session_state.rag is None:
+        try:
+            chroma = _get_chroma_client(str(st.session_state.project_dir / "vectordb"))
+            voyage = _get_voyage_client(config.VOYAGE_API_KEY) if config.VOYAGE_API_KEY else None
+            st.session_state.rag = ForgeRAG(
+                st.session_state.project_dir,
+                chroma_client=chroma,
+                voyage_client=voyage,
+            )
+        except Exception as e:
+            logger.warning("RAG initialization failed: %s", e)
+
     # --- PHASE A: Route ---
     routing_decision = _run_phase_a(user_message)
 
+    # --- Context Assembly (with retrieval bypass for filler turns) ---
+    assembled = None
+    if st.session_state.rag and st.session_state.rag.enabled:
+        if routing_decision.get("requires_retrieval", True):
+            assembled = st.session_state.rag.assemble_context(
+                user_message=user_message,
+                phase_a_decision=routing_decision,
+                current_turn=st.session_state.turn_count,
+                project_state=st.session_state.project_state,
+            )
+        else:
+            assembled = st.session_state.rag.assemble_context_minimal(
+                phase_a_decision=routing_decision,
+                current_turn=st.session_state.turn_count,
+                project_state=st.session_state.project_state,
+            )
+            logger.info("Retrieval bypassed — filler turn detected by Phase A")
+
     # --- PHASE B: Act ---
-    response_text = _run_phase_b(routing_decision)
+    response_text = _run_phase_b(routing_decision, assembled_context=assembled)
 
     # Add assistant response to history
     st.session_state.messages.append({"role": "assistant", "content": response_text})
 
     # --- POST-TURN: Update routing context ---
-    _post_turn_updates(routing_decision)
+    _post_turn_updates(routing_decision, user_message, response_text)
 
     # Auto-save project state
     if hasattr(st.session_state, 'project_dir') and st.session_state.project_dir:
@@ -150,6 +195,7 @@ def _run_phase_a(user_message: str) -> dict:
             "micro_synthesis_due": False,
             "enrichment_needed": False,
             "enrichment_query": "",
+            "requires_retrieval": True,
         }
 
     # Handle mode entry
@@ -175,45 +221,19 @@ def _run_phase_a(user_message: str) -> dict:
     return routing
 
 
-def _run_phase_b(routing_decision: dict) -> str:
+def _run_phase_b(routing_decision: dict, assembled_context: dict | None = None) -> str:
     """
     Heavy execution call. Either orchestrator questioning or mode execution.
     Handles tool calls in a loop until the model stops calling tools.
     Returns the final text response.
+
+    If assembled_context is provided (RAG enabled), uses targeted context
+    instead of full knowledge base dumps. Falls back to legacy behavior
+    when assembled_context is None.
     """
-    org_context_text = format_org_context()
     logger.info("Phase B executing: %s", st.session_state.active_mode or "orchestrator")
 
-    # Build the appropriate prompt based on active mode
-    if st.session_state.active_mode == "mode_1":
-        phase_b_prompt = PHASE_B_MODE1_PROMPT.format(
-            phase_a_output=json.dumps(routing_decision, indent=2),
-            full_messages=_format_messages(st.session_state.messages),
-            full_assumptions=_format_assumptions(),
-            document_skeleton=_format_skeleton(),
-            org_context=org_context_text,
-            mode1_knowledge=MODE1_KNOWLEDGE,
-            turn_count=st.session_state.turn_count,
-            is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
-        )
-    elif st.session_state.active_mode == "mode_2":
-        phase_b_prompt = PHASE_B_MODE2_PROMPT.format(
-            phase_a_output=json.dumps(routing_decision, indent=2),
-            full_messages=_format_messages(st.session_state.messages),
-            full_assumptions=_format_assumptions(),
-            document_skeleton=_format_skeleton(),
-            org_context=org_context_text,
-            mode2_knowledge=MODE2_KNOWLEDGE,
-            turn_count=st.session_state.turn_count,
-            is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
-        )
-    else:
-        phase_b_prompt = PHASE_B_ORCHESTRATOR_PROMPT.format(
-            phase_a_output=json.dumps(routing_decision, indent=2),
-            full_messages=_format_messages(st.session_state.messages),
-            org_context=org_context_text,
-            turn_count=st.session_state.turn_count,
-        )
+    phase_b_prompt = _build_phase_b_prompt(routing_decision, assembled_context)
 
     # Context window safety check
     estimated_tokens = len(phase_b_prompt) // 4
@@ -223,35 +243,9 @@ def _run_phase_b(routing_decision: dict) -> str:
             first_msg = messages[0]
             recent_msgs = messages[-20:]
             truncated = [first_msg, {"role": "assistant", "content": "[...earlier conversation truncated for context length...]"}] + recent_msgs
-            if st.session_state.active_mode == "mode_1":
-                phase_b_prompt = PHASE_B_MODE1_PROMPT.format(
-                    phase_a_output=json.dumps(routing_decision, indent=2),
-                    full_messages=_format_messages(truncated),
-                    full_assumptions=_format_assumptions(),
-                    document_skeleton=_format_skeleton(),
-                    org_context=org_context_text,
-                    mode1_knowledge=MODE1_KNOWLEDGE,
-                    turn_count=st.session_state.turn_count,
-                    is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
-                )
-            elif st.session_state.active_mode == "mode_2":
-                phase_b_prompt = PHASE_B_MODE2_PROMPT.format(
-                    phase_a_output=json.dumps(routing_decision, indent=2),
-                    full_messages=_format_messages(truncated),
-                    full_assumptions=_format_assumptions(),
-                    document_skeleton=_format_skeleton(),
-                    org_context=org_context_text,
-                    mode2_knowledge=MODE2_KNOWLEDGE,
-                    turn_count=st.session_state.turn_count,
-                    is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
-                )
-            else:
-                phase_b_prompt = PHASE_B_ORCHESTRATOR_PROMPT.format(
-                    phase_a_output=json.dumps(routing_decision, indent=2),
-                    full_messages=_format_messages(truncated),
-                    org_context=org_context_text,
-                    turn_count=st.session_state.turn_count,
-                )
+            phase_b_prompt = _build_phase_b_prompt(
+                routing_decision, assembled_context, messages_override=truncated
+            )
 
     # Build messages for API call
     api_messages = [{"role": "user", "content": phase_b_prompt}]
@@ -318,7 +312,105 @@ def _run_phase_b(routing_decision: dict) -> str:
     return final_text
 
 
-def _post_turn_updates(routing_decision: dict):
+def _build_phase_b_prompt(
+    routing_decision: dict,
+    assembled_context: dict | None = None,
+    messages_override: list | None = None,
+) -> str:
+    """Build the Phase B prompt, using assembled context when available.
+
+    If assembled_context is None, falls back to legacy behavior (full
+    knowledge base, full org context). This ensures the app works
+    without RAG configured.
+    """
+    messages = messages_override or st.session_state.messages
+
+    if assembled_context is not None:
+        # --- RAG-enhanced path: targeted context ---
+        if st.session_state.active_mode == "mode_1":
+            return PHASE_B_MODE1_PROMPT.format(
+                phase_a_output=json.dumps(routing_decision, indent=2),
+                full_messages=_format_messages(messages),
+                full_assumptions=_format_assumptions(),
+                document_skeleton=_format_skeleton(),
+                org_context=assembled_context["context_block"],
+                mode1_knowledge=(
+                    MODE1_CORE_INSTRUCTIONS
+                    + _assembled_sections(assembled_context)
+                ),
+                turn_count=st.session_state.turn_count,
+                is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
+            )
+        elif st.session_state.active_mode == "mode_2":
+            return PHASE_B_MODE2_PROMPT.format(
+                phase_a_output=json.dumps(routing_decision, indent=2),
+                full_messages=_format_messages(messages),
+                full_assumptions=_format_assumptions(),
+                document_skeleton=_format_skeleton(),
+                org_context=assembled_context["context_block"],
+                mode2_knowledge=(
+                    MODE2_CORE_INSTRUCTIONS
+                    + _assembled_sections(assembled_context)
+                ),
+                turn_count=st.session_state.turn_count,
+                is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
+            )
+        else:
+            return PHASE_B_ORCHESTRATOR_PROMPT.format(
+                phase_a_output=json.dumps(routing_decision, indent=2),
+                full_messages=_format_messages(messages),
+                org_context=assembled_context["context_block"],
+                turn_count=st.session_state.turn_count,
+            )
+    else:
+        # --- Legacy path: full knowledge base (no RAG) ---
+        org_context_text = format_org_context()
+        if st.session_state.active_mode == "mode_1":
+            return PHASE_B_MODE1_PROMPT.format(
+                phase_a_output=json.dumps(routing_decision, indent=2),
+                full_messages=_format_messages(messages),
+                full_assumptions=_format_assumptions(),
+                document_skeleton=_format_skeleton(),
+                org_context=org_context_text,
+                mode1_knowledge=MODE1_KNOWLEDGE,
+                turn_count=st.session_state.turn_count,
+                is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
+            )
+        elif st.session_state.active_mode == "mode_2":
+            return PHASE_B_MODE2_PROMPT.format(
+                phase_a_output=json.dumps(routing_decision, indent=2),
+                full_messages=_format_messages(messages),
+                full_assumptions=_format_assumptions(),
+                document_skeleton=_format_skeleton(),
+                org_context=org_context_text,
+                mode2_knowledge=MODE2_KNOWLEDGE,
+                turn_count=st.session_state.turn_count,
+                is_first_mode_turn=(st.session_state.routing_context["mode_turn_count"] == 0),
+            )
+        else:
+            return PHASE_B_ORCHESTRATOR_PROMPT.format(
+                phase_a_output=json.dumps(routing_decision, indent=2),
+                full_messages=_format_messages(messages),
+                org_context=org_context_text,
+                turn_count=st.session_state.turn_count,
+            )
+
+
+def _assembled_sections(assembled_context: dict) -> str:
+    """Format the assembled RAG context sections for prompt injection."""
+    parts = []
+    if assembled_context["probe_content"]:
+        parts.append(f"\n\n## Active Probe\n{assembled_context['probe_content']}")
+    if assembled_context["pattern_content"]:
+        parts.append(f"\n\n## Triggered Patterns\n{assembled_context['pattern_content']}")
+    if assembled_context["retrieved_documents"]:
+        parts.append(f"\n\n## Retrieved Document Context\n{assembled_context['retrieved_documents']}")
+    if assembled_context["retrieved_conversations"]:
+        parts.append(f"\n\n## Earlier Relevant Exchanges\n{assembled_context['retrieved_conversations']}")
+    return "".join(parts)
+
+
+def _post_turn_updates(routing_decision: dict, user_message: str = "", assistant_response: str = ""):
     """Update routing context after a turn completes."""
     # Track micro-synthesis cadence
     if st.session_state.turn_count % 3 == 0:
@@ -333,6 +425,44 @@ def _post_turn_updates(routing_decision: dict):
     # NOTE: probes_fired and patterns_fired are tracked by Phase B via
     # record_probe_fired and record_pattern_fired tools.
     # No longer inferred from routing_decision["suggested_probes"].
+
+    # Generate turn summary and index in ChromaDB (for future retrieval)
+    if st.session_state.rag and st.session_state.rag.enabled:
+        if st.session_state.turn_count > config.ALWAYS_ON_TURN_WINDOW:
+            try:
+                summary = _generate_turn_summary(user_message, assistant_response)
+                st.session_state.rag.index_turn(
+                    turn_number=st.session_state.turn_count,
+                    user_message=user_message,
+                    assistant_response=assistant_response,
+                    turn_summary=summary,
+                    active_probe=st.session_state.routing_context.get("active_probe", ""),
+                    active_mode=st.session_state.active_mode or "",
+                )
+            except Exception as e:
+                logger.warning("Turn indexing failed: %s", e)
+
+
+def _generate_turn_summary(user_message: str, assistant_response: str) -> str:
+    """Generate 1-2 sentence summary of a completed turn via Haiku.
+
+    Uses the same Anthropic client as all other API calls — just points
+    to TURN_SUMMARY_MODEL (Haiku) instead of MODEL_NAME (Sonnet).
+    """
+    response = client.messages.create(
+        model=config.TURN_SUMMARY_MODEL,
+        max_tokens=100,
+        messages=[{
+            "role": "user",
+            "content": (
+                "Summarize this conversation exchange in 1-2 sentences. "
+                "Focus on what was discussed and any decisions or assumptions made.\n\n"
+                f"User: {user_message[:1000]}\n\n"
+                f"Assistant: {assistant_response[:1000]}"
+            ),
+        }],
+    )
+    return response.content[0].text
 
 
 # --- Helper formatters ---
