@@ -72,3 +72,8 @@ def init_session_state():
         st.session_state.project_name = None
         st.session_state.project_dir = None
         st.session_state.is_priming_turn = False
+        st.session_state.rag = None  # ForgeRAG instance (transient, not persisted)
+        st.session_state.project_state = {  # Persisted in project_state.json
+            "file_summaries": [],
+            "org_context": "",
+        }

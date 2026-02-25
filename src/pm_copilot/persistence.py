@@ -28,6 +28,7 @@ PERSISTED_KEYS = [
     "org_context",
     "latest_artifact",
     "pending_questions",
+    "project_state",
 ]
 
 
@@ -148,3 +149,21 @@ def _write_context_file(project_dir: Path) -> None:
 
     context_file = project_dir / "context.md"
     context_file.write_text("\n".join(parts))
+
+
+def save_project_state(project_dir: Path, project_state: dict) -> None:
+    """Save project_state.json (file summaries + org context)."""
+    state_file = project_dir / "project_state.json"
+    temp_file = project_dir / "project_state.json.tmp"
+    with open(temp_file, "w") as f:
+        json.dump(project_state, f, indent=2)
+    temp_file.rename(state_file)
+
+
+def load_project_state(project_dir: Path) -> dict:
+    """Load project_state.json, return default if doesn't exist."""
+    state_file = project_dir / "project_state.json"
+    if state_file.exists():
+        with open(state_file) as f:
+            return json.load(f)
+    return {"file_summaries": [], "org_context": ""}

@@ -11,6 +11,8 @@ from voyageai.error import RateLimitError, ServerError
 
 from . import config
 from .chunking import process_file
+from .mode1_knowledge import MODE1_PROBES, MODE1_PATTERNS
+from .mode2_knowledge import MODE2_PROBES, MODE2_PATTERNS
 
 logger = logging.getLogger("forge.rag")
 
@@ -27,6 +29,24 @@ def _create_chroma_client(vectordb_path: str) -> chromadb.PersistentClient:
 def _create_voyage_client(api_key: str) -> voyageai.Client:
     """Create Voyage AI client. Called via @st.cache_resource in app.py."""
     return voyageai.Client(api_key=api_key)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def format_context_block(project_state: dict) -> str:
+    """Format project state into a text block for prompt injection."""
+    parts = []
+    org_ctx = project_state.get("org_context", "")
+    if org_ctx:
+        parts.append(f"## Organization Context\n{org_ctx}")
+    file_summaries = project_state.get("file_summaries", [])
+    if file_summaries:
+        parts.append("## Available Documents")
+        for f in file_summaries:
+            parts.append(f"- **{f['filename']}**: {f['summary']}")
+    return "\n\n".join(parts) if parts else "No project context available yet."
 
 
 # ---------------------------------------------------------------------------
@@ -322,3 +342,128 @@ class ForgeRAG:
         # Sort chronologically
         turns.sort(key=lambda x: x["turn_number"])
         return turns
+
+    # -------------------------------------------------------------------
+    # Context assembly
+    # -------------------------------------------------------------------
+
+    def _lookup_probe_and_patterns(
+        self, phase_a_decision: dict
+    ) -> tuple[str, str]:
+        """Look up probe definition and triggered patterns from knowledge base dicts.
+
+        Returns (probe_content, pattern_content) — both plain strings.
+        """
+        probe_name = phase_a_decision.get("next_probe", "")
+        probe_content = (
+            MODE1_PROBES.get(probe_name, "")
+            or MODE2_PROBES.get(probe_name, "")
+        )
+
+        triggered = phase_a_decision.get("triggered_patterns", [])
+        pattern_parts = []
+        for p in triggered:
+            content = MODE1_PATTERNS.get(p, "") or MODE2_PATTERNS.get(p, "")
+            if content:
+                pattern_parts.append(content)
+        pattern_content = "\n\n".join(pattern_parts)
+
+        return probe_content, pattern_content
+
+    @staticmethod
+    def _format_retrieved_documents(results: list[dict]) -> str:
+        """Format document retrieval results for prompt injection."""
+        if not results:
+            return ""
+        parts = []
+        for r in results:
+            parts.append(f"{r['context_header']}\n{r['parent_text']}")
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _format_retrieved_conversations(turns: list[dict]) -> str:
+        """Format conversation retrieval results for prompt injection."""
+        if not turns:
+            return ""
+        parts = []
+        for t in turns:
+            probe_label = f" (Probe: {t['active_probe']})" if t["active_probe"] else ""
+            parts.append(
+                f"Turn {t['turn_number']}{probe_label}:\n"
+                f"User: {t['user_message']}\n"
+                f"Assistant: {t['assistant_response']}"
+            )
+        return "\n\n".join(parts)
+
+    def assemble_context(
+        self,
+        user_message: str,
+        phase_a_decision: dict,
+        current_turn: int,
+        project_state: dict,
+    ) -> dict:
+        """Assemble the full context for Phase B.
+
+        Performs dictionary lookups for probe/pattern content and
+        semantic retrieval from ChromaDB for documents and conversations.
+
+        Returns dict with assembled context sections ready for prompt injection.
+        """
+        # 1. Format context block (deterministic, no API calls)
+        context_block = format_context_block(project_state)
+
+        # 2. Look up active probe and triggered patterns
+        probe_content, pattern_content = self._lookup_probe_and_patterns(
+            phase_a_decision
+        )
+
+        # 3. Retrieve document chunks from ChromaDB
+        query = user_message
+        if probe_content:
+            # Append probe context to improve retrieval relevance
+            query = f"{user_message} {phase_a_decision.get('next_probe', '')}"
+        doc_results = self.retrieve_documents(query)
+        retrieved_documents = self._format_retrieved_documents(doc_results)
+
+        # 4. Retrieve conversation turns from ChromaDB
+        conv_results = self.retrieve_conversations(
+            user_message, current_turn
+        )
+        retrieved_conversations = self._format_retrieved_conversations(
+            conv_results
+        )
+
+        return {
+            "context_block": context_block,
+            "probe_content": probe_content,
+            "pattern_content": pattern_content,
+            "retrieved_documents": retrieved_documents,
+            "retrieved_conversations": retrieved_conversations,
+        }
+
+    def assemble_context_minimal(
+        self,
+        phase_a_decision: dict,
+        current_turn: int,
+        project_state: dict,
+    ) -> dict:
+        """Assemble minimal context for filler/bypass turns.
+
+        Called when Phase A sets requires_retrieval=false. Skips all
+        ChromaDB queries to save ~3 seconds latency and ~7,000 tokens.
+
+        Returns same dict shape as assemble_context() but with empty
+        strings for retrieved_documents and retrieved_conversations.
+        """
+        context_block = format_context_block(project_state)
+        probe_content, pattern_content = self._lookup_probe_and_patterns(
+            phase_a_decision
+        )
+
+        return {
+            "context_block": context_block,
+            "probe_content": probe_content,
+            "pattern_content": pattern_content,
+            "retrieved_documents": "",
+            "retrieved_conversations": "",
+        }
