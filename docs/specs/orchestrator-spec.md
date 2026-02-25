@@ -93,6 +93,30 @@ User Message Arrives
 
 **Note:** During early turns (context gathering), Phase B is still the orchestrator asking questions — it doesn't route to a mode until critical mass is reached. The split isn't always "router → responder"; it's "decide → execute."
 
+### RAG Context Assembly (v0.3.0)
+
+Between Phase A and Phase B, a **context assembly step** replaces the previous approach of dumping the full knowledge base into every Phase B call:
+
+1. **Phase A now outputs `requires_retrieval`** — a boolean indicating whether the user's message is substantive (`true`) or filler like "yes"/"continue" (`false`). Filler turns skip all ChromaDB queries, saving ~3 seconds latency and ~7,000 tokens.
+
+2. **Knowledge base decomposition** — `MODE1_KNOWLEDGE` and `MODE2_KNOWLEDGE` are decomposed into:
+   - `CORE_INSTRUCTIONS` (always injected, ~50% of original)
+   - `PROBES` dict (only the active probe is injected)
+   - `PATTERNS` dict (only triggered patterns are injected)
+
+3. **Context assembly** — `ForgeRAG.assemble_context()` produces a dict with:
+   - `context_block` — Formatted org context + file summaries (deterministic)
+   - `probe_content` — Active probe definition (Python dict lookup, instant)
+   - `pattern_content` — Triggered pattern definitions (dict lookup)
+   - `retrieved_documents` — Relevant chunks from uploaded files (ChromaDB semantic search)
+   - `retrieved_conversations` — Relevant older turns (ChromaDB, outside always-on window)
+
+4. **Fallback path** — When RAG is not configured (no `VOYAGE_API_KEY`), Phase B falls back to injecting the full `MODE1_KNOWLEDGE`/`MODE2_KNOWLEDGE` string, preserving original behavior.
+
+5. **Post-turn indexing** — `_post_turn_updates()` generates a 1-2 sentence turn summary via Haiku (`config.TURN_SUMMARY_MODEL`) and indexes it in ChromaDB's `conversations` collection for future retrieval.
+
+See `docs/specs/rag-architecture-summary.md` and `docs/specs/rag-implementation-spec.md` for full details.
+
 ---
 
 ## 2. The Five Modes

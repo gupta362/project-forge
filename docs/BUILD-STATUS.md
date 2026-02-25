@@ -7,15 +7,17 @@ This is the single source of truth for what's been built, what's next, and where
 
 ## Current State
 
-| Component | Status | Last Updated |
-|-----------|--------|-------------|
-| Orchestrator (two-phase architecture) | ✅ Built & tested | Feb 2025 |
-| Mode 1: Discover & Frame | ✅ Built & tested | Feb 2025 |
-| Mode 2: Evaluate Solution | 📋 Spec finalized v1.1, ready to build | Feb 15 2025 |
-| UI Improvements (download buttons, assumption display) | 📋 Spec ready, build after Mode 2 | Feb 15 2025 |
-| Mode 3-5 | 🔲 Not started | — |
-| Enterprise integrations (Confluence, SharePoint) | 🔲 Not started | — |
-| Multi-user auth / persistence | 🔲 Not started | — |
+| Component | Status | Version | Last Updated |
+|-----------|--------|---------|-------------|
+| Orchestrator (two-phase architecture) | ✅ Built & tested | v0.1.0 | Feb 2025 |
+| Mode 1: Discover & Frame | ✅ Built & tested | v0.1.0 | Feb 2025 |
+| Mode 2: Evaluate Solution | ✅ Built & tested | v0.2.0 | Feb 2025 |
+| RAG: Intelligent Retrieval | ✅ Built & tested | v0.3.0 | Feb 2026 |
+| UI Improvements (download buttons, assumption display) | ✅ Built | v0.2.0 | Feb 2025 |
+| Mode 3: Surface Constraints | 🔲 Not started | — | — |
+| Mode 4-5 | 🔲 Not started | — | — |
+| Enterprise integrations (Confluence, SharePoint) | 🔲 Not started | — | — |
+| Multi-user auth / persistence | 🔲 Not started | — | — |
 
 ---
 
@@ -33,6 +35,8 @@ These are the documents you need to build and maintain the system. No explainers
 | mode1-spec.md | `docs/specs/mode1-spec.md` | Mode 1 knowledge base: 7 diagnostic probes, 8 domain patterns, trigger conditions, completion criteria, behavioral rules. v2.1. Also pasted into `mode1_knowledge.py`. |
 | mode2-spec.md | `docs/specs/mode2-spec.md` | Mode 2 knowledge base: 7 solution-evaluation probes, 5 domain patterns, three-layer risk identification, semantic tools, artifact structure. v1.1 (post-engineering review). Also pasted into `mode2_knowledge.py`. |
 | implementation-spec.md | `docs/specs/implementation-spec.md` | The BIG build spec for Orchestrator + Mode 1. File structure, data models, tool definitions with exact code, prompt templates, Streamlit UI, session management. This is what Claude Code builds from. v2.1. |
+| rag-architecture-summary.md | `docs/specs/rag-architecture-summary.md` | RAG architecture: vector DB, embedding model, chunking strategy, two-phase retrieval, SRE hardening. v2.1. |
+| rag-implementation-spec.md | `docs/specs/rag-implementation-spec.md` | RAG build spec: every function, data structure, integration point. Cached client pattern, tenacity retry, retrieval bypass, graceful DOCX handling. |
 
 #### Build Guides (the HOW)
 
@@ -90,22 +94,29 @@ These files were created during design sessions but are NOT build documents. The
 project-forge/
 ├── src/
 │   └── pm_copilot/
-│       ├── app.py
-│       ├── config.py
-│       ├── orchestrator.py
+│       ├── app.py                  ← + sidebar file upload, @st.cache_resource singletons
+│       ├── config.py               ← + RAG/embedding settings, VOYAGE_API_KEY
+│       ├── orchestrator.py         ← + RAG init, context assembly, turn indexing
 │       ├── org_context.py
-│       ├── prompts.py
-│       ├── state.py
-│       ├── tools.py
-│       ├── mode1_knowledge.py      ← contents of mode1-spec.md as string
-│       └── mode2_knowledge.py      ← contents of mode2-spec.md as string (Mode 2 build)
+│       ├── prompts.py              ← + requires_retrieval, assembled context sections
+│       ├── state.py                ← + rag, project_state fields
+│       ├── tools.py                ← + org_context sync to project_state
+│       ├── persistence.py          ← + save/load_project_state
+│       ├── mode1_knowledge.py      ← decomposed: CORE_INSTRUCTIONS + PROBES dict + PATTERNS dict
+│       ├── mode2_knowledge.py      ← decomposed: CORE_INSTRUCTIONS + PROBES dict + PATTERNS dict
+│       ├── rag.py                  ← NEW: ForgeRAG, ChromaDB storage, Voyage embeddings, context assembly
+│       ├── chunking.py             ← NEW: DOCX/MD conversion, hierarchical chunking, parent-child pairs
+│       ├── logging_config.py
+│       └── sidebar_docs.py
 ├── docs/
 │   ├── BUILD-STATUS.md             ← THIS FILE
 │   ├── specs/
 │   │   ├── orchestrator-spec.md
 │   │   ├── mode1-spec.md
 │   │   ├── mode2-spec.md
-│   │   └── implementation-spec.md
+│   │   ├── implementation-spec.md
+│   │   ├── rag-architecture-summary.md   ← NEW
+│   │   └── rag-implementation-spec.md    ← NEW
 │   └── build/
 │       ├── mode1-instructions.md
 │       ├── mode1-prompts.md
@@ -125,20 +136,23 @@ project-forge/
 **Docs used:** `implementation-spec.md` + `mode1-instructions.md` + `mode1-prompts.md`
 **Specs referenced:** `orchestrator-spec.md` + `mode1-spec.md`
 
-### Phase 2: Mode 2 — NEXT
-**Docs to use:** `mode2-instructions.md` + `mode2-prompts.md`
+### Phase 2: Mode 2 ✅ COMPLETE
+**Docs used:** `mode2-instructions.md` + `mode2-prompts.md`
 **Specs referenced:** `mode2-spec.md`
-**Pre-req:** Switch config.py from Haiku to Sonnet before testing
 
-### Phase 3: UI Improvements — AFTER Mode 2
-**Docs to use:** `ui-improvements.md`
-**What it adds:** Assumption register download (JSON + CSV), improved sidebar display, input sandboxing for large pastes, file upload widget
+### Phase 3: UI Improvements ✅ COMPLETE
+**Docs used:** `ui-improvements.md`
 
-### Phase 4: Modes 3-5 — FUTURE
+### Phase 4: RAG ✅ COMPLETE (v0.3.0)
+**Docs used:** `rag-implementation-spec.md`
+**Specs referenced:** `rag-architecture-summary.md`
+**What it adds:** Document upload (DOCX/MD), ChromaDB vector storage, Voyage AI embeddings, context assembly with retrieval bypass, turn summary indexing, selective knowledge base injection, filler turn detection
+
+### Phase 5: Modes 3-5 — NEXT
 **Specs:** Not yet written
 **Pattern:** Same as Mode 2 — spec first, then build instructions + prompts
 
-### Phase 5: Enterprise — FUTURE
+### Phase 6: Enterprise — FUTURE
 **What:** Multi-user auth, persistent storage, Confluence/SharePoint integration
 **Framework change:** Streamlit → FastAPI + React (when user count exceeds ~10)
 
@@ -154,3 +168,4 @@ project-forge/
 | Feb 15, 2025 | Mode 2 build instructions + prompts created |
 | Feb 15, 2025 | UI improvements spec created |
 | Feb 15, 2025 | BUILD-STATUS.md created — master tracking document |
+| Feb 24, 2026 | RAG build complete (v0.3.0): document upload, vector retrieval, context assembly, knowledge base decomposition |
