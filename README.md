@@ -138,6 +138,9 @@ project-forge/
 │   ├── mode1_knowledge.py     # Mode 1 knowledge base (probes, patterns, diplomatic layer)
 │   ├── mode2_knowledge.py     # Mode 2 knowledge base (risk dimensions, evaluation framework)
 │   ├── org_context.py         # Dynamic org context formatter
+│   ├── persistence.py         # Project save/load, slugify, context.md sync
+│   ├── logging_config.py      # Rotating file + console logging setup
+│   ├── sidebar_docs.py        # Quick Start and How It Works content
 │   └── config.py              # Model names, token limits
 ├── docs/
 │   ├── specs/                 # Behavioral specifications
@@ -189,6 +192,7 @@ cp .env.example .env
 ### Run
 
 ```bash
+source .venv/bin/activate
 streamlit run src/pm_copilot/app.py
 ```
 
